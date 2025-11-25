@@ -4,6 +4,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 import textwrap
 import math
+import re # Añadido para sanitización de la fuente
 
 # --- CONFIGURACIÓN DE RUTAS ---
 DATA_DIR = Path("data")
@@ -33,8 +34,12 @@ def load_zones():
 def save_zones(data):
     with open(ZONES_FILE, "w", encoding="utf-8") as f: json.dump(data, f, indent=4)
 
-def get_custom_font(font_name, size):
-    """Carga fuentes del sistema disponibles."""
+def get_custom_font(font_name: str, size: int):
+    """Carga fuentes de forma segura, saneando el nombre."""
+    # Sanear el nombre de la fuente para evitar errores en el sistema de archivos
+    safe_font_name = re.sub(r'[^a-zA-Z0-9 ]', '', font_name)
+    
+    # Asignación de archivos TTF (debe coincidir con las fuentes disponibles en el sistema)
     font_files = {
         "Arial": "arial.ttf", "Arial Black": "ariblk.ttf", 
         "Calibri": "calibri.ttf", "Comic Sans MS": "comic.ttf",
@@ -42,22 +47,31 @@ def get_custom_font(font_name, size):
         "Impact": "impact.ttf", "Lucida Console": "lucon.ttf",
         "Roboto": "Roboto-Regular.ttf", "Segoe UI": "segoeui.ttf",
         "Tahoma": "tahoma.ttf", "Times New Roman": "times.ttf",
-        "Trebuchet MS": "trebuc.ttf", "Verdana": "verdana.ttf"
+        "Trebuchet MS": "trebuc.ttf", "Verdana": "verdana.ttf",
+        "Poppins": "arial.ttf", # Fallback conocido
+        "Montserrat": "arial.ttf", # Fallback conocido
+        "Inter": "arial.ttf", # Fallback conocido
+        "Lato": "arial.ttf", # Fallback conocido
     }
-    filename = font_files.get(font_name, "arial.ttf")
+    filename = font_files.get(safe_font_name, "arial.ttf")
+    
     try:
-        # Buscar en el directorio actual o en el sistema (dependiendo de la instalación PIL/sistema)
+        # Intentar cargar la fuente específica
         return ImageFont.truetype(filename, size)
     except:
-        try: return ImageFont.truetype("arial.ttf", size)
-        except: return ImageFont.load_default()
+        try: 
+            # Fallback a Arial (seguro)
+            return ImageFont.truetype("arial.ttf", size)
+        except: 
+            # Fallback a la fuente por defecto de PIL (seguro)
+            return ImageFont.load_default()
 
 # --- HEADER CON TÍTULO Y SUBTÍTULO (POSICIÓN CENTRAL) ---
 def create_header_image(width, config, logo_path=None):
     bg_color = config.get("bg_color", "#FFFFFF")
     use_logo = config.get("use_logo", False)
     logo_w_req = config.get("logo_width", 150)
-    logo_align = config.get("logo_align", "Izquierda") # OBTENEMOS LA NUEVA ALINEACIÓN
+    logo_align = config.get("logo_align", "Izquierda")
     
     # Título
     t_text = config.get("title_text", "")
@@ -69,7 +83,7 @@ def create_header_image(width, config, logo_path=None):
     # Subtítulo
     s_text = config.get("subtitle_text", "")
     s_font = config.get("subtitle_font", "Arial") 
-    s_size = config.get("subtitle_size", 24)     
+    s_size = config.get("subtitle_size", 24)       
     s_color = config.get("subtitle_color", "#666666")
     s_align = config.get("subtitle_align", "Centro") 
     
@@ -77,10 +91,11 @@ def create_header_image(width, config, logo_path=None):
     font_t = get_custom_font(t_font, t_size)
     font_s = get_custom_font(s_font, s_size)
     
+    # Cálculo de la altura del texto (más seguro con getbbox)
     try: h_t = font_t.getbbox(t_text)[3] - font_t.getbbox(t_text)[1] if t_text else 0
-    except: h_t = t_size # Fallback
+    except: h_t = t_size 
     try: h_s = font_s.getbbox(s_text)[3] - font_s.getbbox(s_text)[1] if s_text else 0
-    except: h_s = s_size # Fallback
+    except: h_s = s_size 
     
     gap_px = 20 if s_text else 0 
     padding_top = 40
@@ -88,29 +103,35 @@ def create_header_image(width, config, logo_path=None):
     
     logo_h = 0
     logo_w = 0
+    logo_img = None
     
     if use_logo and logo_path and os.path.exists(logo_path):
-        logo_img = Image.open(logo_path).convert("RGBA")
-        asp = logo_img.height / logo_img.width
-        logo_w = logo_w_req
-        logo_h = int(logo_w * asp)
-    
+        try:
+            logo_img = Image.open(logo_path).convert("RGBA")
+            asp = logo_img.height / logo_img.width
+            logo_w = logo_w_req
+            logo_h = int(logo_w * asp)
+        except Exception as e:
+             print(f"Error cargando logo: {e}")
+             use_logo = False # Deshabilitar si falla la carga
+             
     # Altura requerida para logo + textos
-    content_height = logo_h + (padding_top if logo_h else 0) + h_t + gap_px + h_s
+    content_height = h_t + gap_px + h_s
     
     # Altura final (mínimo 150)
-    header_height = max(150, content_height + padding_top + padding_bottom)
+    # Se agrega el espacio del logo solo si hay logo, y el padding general
+    header_height = max(150, content_height + padding_top + padding_bottom + logo_h)
     
     img = Image.new("RGB", (width, header_height), bg_color)
     draw = ImageDraw.Draw(img)
 
-    # 1. Posición del Bloque (Logo + Textos)
-    block_y_start = (header_height - content_height) // 2
+    # 1. Posición vertical inicial (Centrado en el espacio disponible)
+    block_y_start = (header_height - (content_height + logo_h)) // 2
     
     current_y = block_y_start
     
     # 2. Logo
-    if use_logo and logo_path and os.path.exists(logo_path):
+    if use_logo and logo_img:
         try:
             logo_img = logo_img.resize((logo_w, logo_h), Image.Resampling.LANCZOS)
             
@@ -123,13 +144,12 @@ def create_header_image(width, config, logo_path=None):
                 x_pos_logo = (width - logo_w) // 2 
             
             img.paste(logo_img, (x_pos_logo, current_y), logo_img)
-            current_y += logo_h + padding_top # Mover Y debajo del logo
+            current_y += logo_h + 20 # Mover Y debajo del logo + gap
         except Exception as e: 
-            print(f"Error al cargar/posicionar logo: {e}")
+            print(f"Error al posicionar logo: {e}")
             pass
             
     # Helper alineación
-    # Esta función determina la posición X del texto (Título/Subtítulo) en el ancho total
     def get_x(txt, fnt, align):
         try:
             w = fnt.getbbox(txt)[2] - fnt.getbbox(txt)[0]
@@ -140,20 +160,7 @@ def create_header_image(width, config, logo_path=None):
         elif align == "Derecha": return width - w - 30
         else: return (width - w) // 2
 
-    # 3. Dibujar Textos (Debajo del logo si existe, o en la parte superior del bloque)
-    
-    if t_text:
-        tx = get_x(t_text, font_t, t_align)
-        draw.text((tx, current_y), t_text, font=font_t, fill=t_color)
-        current_y += h_t + gap_px
-    
-    if s_text:
-        sx = get_x(s_text, font_s, s_align)
-        draw.text((sx, current_y), s_text, font=font_s, fill=s_color)
-
-    return img
-
-    # 3. Dibujar Textos (Debajo del logo si existe, o en la parte superior del bloque)
+    # 3. Dibujar Textos (Debajo del logo si existe)
     
     if t_text:
         tx = get_x(t_text, font_t, t_align)
@@ -167,7 +174,7 @@ def create_header_image(width, config, logo_path=None):
     return img
 
 # --- LEYENDA (Añadido estilo configurable y alineación) ---
-def create_legend_image(zones_list, width, seat_counts, config, bg_color="white"):
+def create_legend_image(zones_list, width, seat_counts, config, bg_color="#FFFFFF"):
     unique_teams = {}
     for z in zones_list: unique_teams[z['team']] = z['color']
     if not unique_teams: return None
@@ -175,10 +182,10 @@ def create_legend_image(zones_list, width, seat_counts, config, bg_color="white"
     # Configuración de Leyenda (Título y Elementos)
     leg_font = config.get("legend_font", "Arial")
     leg_size = config.get("legend_size", 14)
-    leg_align = config.get("legend_align", "Izquierda") # USANDO NUEVO PARÁMETRO
+    leg_align = config.get("legend_align", "Izquierda") 
     
     font = get_custom_font(leg_font, leg_size)
-    title_font = get_custom_font(leg_font, int(leg_size * 1.5)) # Título un poco más grande
+    title_font = get_custom_font(leg_font, int(leg_size * 1.5))
     
     padding = 30; row_h = int(leg_size * 2.5); circ = int(leg_size * 0.7)
     if row_h < 40: row_h = 40
@@ -227,7 +234,10 @@ def create_legend_image(zones_list, width, seat_counts, config, bg_color="white"
             col_start = padding + (c_idx * cw)
             col_end = col_start + cw
             
-            w_lbl = font.getbbox(lbl)[2] - font.getbbox(lbl)[0]
+            # Cálculo del ancho de la etiqueta
+            try: w_lbl = font.getbbox(lbl)[2] - font.getbbox(lbl)[0]
+            except: w_lbl = 0
+            
             w_item = (circ * 2) + 20 + w_lbl
             
             if leg_align == "Centro":
@@ -251,8 +261,9 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
     if piso_name not in zones_data or not zones_data[piso_name]: return None
 
     piso_num = piso_name.replace("Piso ", "").strip()
-    img_path = PLANOS_DIR / f"piso {piso_num}.png"
-    if not img_path.exists(): img_path = PLANOS_DIR / f"piso {piso_num}.jpg"
+    # Asumimos que los archivos están sin espacio (piso1.png, piso2.png)
+    img_path = PLANOS_DIR / f"piso{piso_num}.png"
+    if not img_path.exists(): img_path = PLANOS_DIR / f"piso{piso_num}.jpg"
     if not img_path.exists(): return None
 
     try:
@@ -275,7 +286,7 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
         if header_config is None: header_config = {}
         head_img = create_header_image(fw, header_config, logo_path)
         
-        # LÓGICA DE VISIBILIDAD DE LEYENDA AGREGADA AQUÍ
+        # LÓGICA DE VISIBILIDAD DE LEYENDA
         use_legend = header_config.get("use_legend", True) 
         leg_img = None
         if use_legend:
@@ -299,9 +310,8 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
         out_p = COLORED_DIR / out_n
         
         # Guardar con calidad máxima. 
-        # Para PDF, PIL ajusta automáticamente el tamaño de la hoja a la imagen
         final.save(out_p, quality=95)
-            
+        
         return out_p
 
     except Exception as e:
