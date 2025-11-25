@@ -936,17 +936,18 @@ elif menu == "Administrador":
         p_sel = c1.selectbox("Piso", pisos_list); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
         p_num = p_sel.replace("Piso ", "").strip()
         
-        # --- CÓDIGO CORREGIDO PARA ELIMINAR ESPACIO Y BASE64 ---
+        # --- CÓDIGO CORREGIDO PARA LA CARGA DEL PLANO ---
+        # 1. Búsqueda de Archivo (Sin Espacio)
+        file_base = f"piso{p_num}" # Genera 'piso2'
         
-        # 1. Búsqueda de Archivo (Sin Espacio, asumiendo piso1.png, piso2.png en GitHub)
-        file_base = f"piso{p_num}"
         pim = PLANOS_DIR / f"{file_base}.png"
         if not pim.exists(): 
             pim = PLANOS_DIR / f"{file_base}.jpg"
-        if not pim.exists(): # Fallback para mayúsculas
+        if not pim.exists(): # Fallback a P mayúscula
             pim = PLANOS_DIR / f"Piso{p_num}.png"
             
         print(f"DEBUG PATH FINAL: Buscando {pim}. Existe: {pim.exists()}")
+        # --- FIN DE BÚSQUEDA ---
         
         if pim.exists():
             # Limpiamos la indentación y usamos la conversión Base64
@@ -1075,7 +1076,7 @@ elif menu == "Administrador":
             tf = fpng if "PNG" in fmt_sel else fpdf
             mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
             if tf.exists():
-                with open(tf,"rb") as f: st.download_button(f"📥 Descargar {sf}", f, tf.name, mm, use_container_width=True)
+                with open(tf,"rb") as f: st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True)
 
     with t3:
         st.subheader("Generar Reportes de Distribución")
@@ -1143,5 +1144,3 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
-
-
