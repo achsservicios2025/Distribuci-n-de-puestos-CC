@@ -50,13 +50,14 @@ def get_worksheet(conn, sheet_name):
                 return conn.add_worksheet(title=sheet_name, rows=100, cols=20)
             except APIError:
                 time.sleep(1)
+                # Intenta la lectura final después de intentar crear (si falló la creación)
                 if conn: return conn.worksheet(sheet_name)
         except APIError as e:
             if "429" in str(e):
                 time.sleep(2 * (attempt + 1))
                 continue
             print(f"Error API (get_worksheet): {e}")
-            return None
+            return None # Retorna un valor seguro si hay un error API no recuperable
         except Exception as e:
             print(f"Error inesperado (get_worksheet): {e}")
             return None
@@ -77,6 +78,7 @@ def init_db(conn):
         ws = get_worksheet(conn, name)
         if ws:
             try:
+                # Comprobación de encabezado
                 if not ws.row_values(1): ws.append_row(headers)
             except: pass
         time.sleep(0.2)
@@ -180,7 +182,6 @@ def delete_reservation_from_db(conn, user_name, date_str, team_area):
     except: return False
 
 def count_monthly_free_spots(conn, identifier, date_obj):
-    # Nota: list_reservations_df ya maneja internamente si conn es malo retornando DF vacío
     df = list_reservations_df(conn) 
     if df.empty: return 0
     
@@ -235,15 +236,21 @@ def save_setting(conn, key, value):
     try:
         cell = ws.find(key, in_column=1)
         ws.update_cell(cell.row, 2, value)
-    except: 
-        try: ws.append_row([key, value, datetime.datetime.now().isoformat()])
-        except: pass
+    except Exception as e:
+        # Usamos la excepción específica para evitar errores de find que no sean "no encontrado"
+        if "cell must be a Cell object" in str(e):
+             print(f"Error de gspread: {e}")
+        try: 
+            # Intentar añadir una nueva fila si la clave no fue encontrada
+            ws.append_row([key, value, datetime.datetime.now().isoformat()])
+        except: 
+            pass
     get_all_settings.clear()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_settings(_conn):
     ws = get_worksheet(_conn, "settings")
-    if ws is None: return {} 
+    if ws is None: return {}
     
     try: return {r['key']: r['value'] for r in ws.get_all_records()}
     except: return {}
@@ -299,4 +306,3 @@ def perform_granular_delete(conn, option):
             msg.append("Distribución eliminada")
         
     return ", ".join(msg) + "."
-
