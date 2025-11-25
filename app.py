@@ -13,12 +13,11 @@ from PIL import Image as PILImage
 from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
-# REMOVIDO: import base64
+import base64
 
 # ---------------------------------------------------------
-# 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
+# 1. PARCHE PARA STREAMLIT >= 1.39 (FIX st_canvas)
 # ---------------------------------------------------------
-# NOTA: ESTE PARCHE ES EL QUE PERMITE QUE PIL IMAGE FUNCIONE EN EL CANVAS
 import streamlit.elements.lib.image_utils
 
 if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
@@ -967,7 +966,6 @@ elif menu == "Administrador":
 
             # 3. Llamada al Canvas con la URL
             canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
-            # --- FIN DEL CÓDIGO DE CONVERSIÓN ---
         
             current_seats_dict = {}
             eqs = [""]
@@ -1077,7 +1075,7 @@ elif menu == "Administrador":
             tf = fpng if "PNG" in fmt_sel else fpdf
             mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
             if tf.exists():
-                with open(tf,"rb") as f: st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True)
+                with open(tf,"rb") as f: st.download_button(f"📥 Descargar {sf}", f, tf.name, mm, use_container_width=True)
 
     with t3:
         st.subheader("Generar Reportes de Distribución")
