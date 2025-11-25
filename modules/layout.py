@@ -2,6 +2,7 @@
 import streamlit as st
 from modules.database import save_setting, get_all_settings
 from pathlib import Path
+import re # Necesario para la sanitización de fuentes
 
 STATIC_DIR = Path("static")
 STATIC_DIR.mkdir(exist_ok=True)
@@ -27,6 +28,7 @@ def admin_appearance_ui(conn):
         save_setting(conn,"font",font)
         save_setting(conn,"site_title",site_title)
         if logo is not None:
+            # Uso de 'with open' garantiza que el archivo se cierre correctamente
             with open(STATIC_DIR/"logo.png","wb") as f:
                 f.write(logo.getbuffer())
             save_setting(conn,"logo_path",str(STATIC_DIR/"logo.png"))
@@ -38,16 +40,20 @@ def apply_appearance_styles(conn):
     primary = settings.get("primary","#00A04A")
     bg = settings.get("bg","#ffffff")
     text = settings.get("text","#111111")
+    
+    # --- CORRECCIÓN DE SEGURIDAD: SANEAMIENTO DE FUENTE ---
+    # Esto elimina caracteres peligrosos, previniendo la inyección CSS.
+    safe_font_name = re.sub(r'[^a-zA-Z0-9 ]', '', font)
+    
     css = f"""
-    @import url('https://fonts.googleapis.com/css2?family={font.replace(' ','+')}');
+    @import url('https://fonts.googleapis.com/css2?family={safe_font_name.replace(' ','+')}');
     :root {{
         --primary:{primary};
         --bg:{bg};
         --text:{text};
     }}
-    body {{ background: var(--bg); color: var(--text); font-family: '{font}', sans-serif; }}
+    body {{ background: var(--bg); color: var(--text); font-family: '{safe_font_name}', sans-serif; }}
     .stButton>button {{ background-color: var(--primary); color: white; border-radius:8px; }}
     .stSelectbox>div, .stTextInput>div {{ border-radius:8px; }}
     """
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
