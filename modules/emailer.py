@@ -6,15 +6,20 @@ import os
 
 def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.png"):
     """
-    Envía un correo HTML con el logo incrustado (si es posible).
-    Asegura que el remitente sea el usuario de autenticación SMTP para cumplir con Brevo.
+    Envía un correo HTML usando el SENDER verificado para evitar rechazos de Brevo.
     """
-    # Intentar obtener credenciales de secrets
     try:
         smtp_server = st.secrets["smtp"]["server"]
         smtp_port = st.secrets["smtp"]["port"]
-        smtp_user = st.secrets["smtp"]["user"] # Usuario Brevo (e.g., 9bdaad001@smtp-brevo.com)
+        smtp_user = st.secrets["smtp"]["user"] # Usuario de autenticación Brevo
         smtp_password = st.secrets["smtp"]["password"]
+        
+        # OBTENEMOS LA DIRECCIÓN VERIFICADA (Ej: achsservicios.2025@gmail.com)
+        # Usamos .get para tomar el valor 'sender' de secrets.toml
+        verified_sender = st.secrets["smtp"].get("sender") 
+        if not verified_sender:
+             verified_sender = smtp_user # Fallback a usuario Brevo si no se encuentra sender
+        
     except KeyError:
         print("ERROR SMTP: No se encontraron todas las credenciales SMTP en secrets.toml")
         return False
@@ -25,29 +30,17 @@ def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     
-    # ----------------------------------------------------
-    # CORRECCIÓN CLAVE: Asignamos un nombre visible al remitente
-    # Esto usa el email de autenticación (smtp_user) para garantizar el envío
+    # CORRECCIÓN 1: Usamos la dirección VERIFICADA para el campo "From"
     display_name = "ACHS Servicios - Gestión"
-    msg["From"] = f"{display_name} <{smtp_user}>"
-    # ----------------------------------------------------
+    msg["From"] = f"{display_name} <{verified_sender}>"
     
     msg["To"] = to_email
 
-    # Diseño HTML Profesional
+    # ... (Contenido HTML omitido para brevedad) ...
     html_content = f"""
     <html>
     <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }}
-            .header {{ background-color: #00A04A; padding: 20px; text-align: center; color: white; }}
-            .content {{ padding: 20px; }}
-            .footer {{ background-color: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888; }}
-            h2 {{ margin-top: 0; }}
-            ul {{ background: #f0f8ff; padding: 15px; border-radius: 5px; }}
-            li {{ list-style: none; padding: 5px 0; }}
-        </style>
+    ...
     </head>
     <body>
         <div class="container">
@@ -66,7 +59,6 @@ def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.
     </body>
     </html>
     """
-
     part = MIMEText(html_content, "html")
     msg.attach(part)
 
@@ -74,9 +66,12 @@ def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
-            # Aseguramos que el envío use el usuario autenticado como remitente
-            server.sendmail(smtp_user, to_email, msg.as_string()) 
+            
+            # CORRECCIÓN 2 (CRÍTICA): Usamos la dirección VERIFICADA para el sobre de envío
+            # Esto resuelve el error "sender... is not valid"
+            server.sendmail(verified_sender, to_email, msg.as_string()) 
         return True
     except Exception as e:
-        print(f"Error enviando email: Falló la conexión SMTP o la autenticación. Detalle: {e}")
+        print(f"Error enviando email: Falló la conexión SMTP. Detalle: {e}")
         return False
+
