@@ -41,7 +41,6 @@ from modules.database import (
     read_distribution_df, save_setting, get_all_settings,
     add_reservation, user_has_reservation, list_reservations_df,
     add_room_reservation, get_room_reservations_df,
-    # MODIFICADO: Importamos estas funciones desde database.py en vez de definirlas aqui con SQL
     count_monthly_free_spots, delete_reservation_from_db, 
     delete_room_reservation_from_db, perform_granular_delete,
     ensure_reset_table, save_reset_token, validate_and_consume_token
@@ -72,6 +71,23 @@ try:
     if "-----BEGIN PRIVATE KEY-----" not in pk:
         st.error("🚨 ERROR EN PRIVATE KEY: No parece una llave válida. Revisa que incluya -----BEGIN PRIVATE KEY-----")
         st.stop()
+        
+    # Prueba de conexión directa
+    from google.oauth2.service_account import Credentials
+    import gspread
+    
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+    
+    # Prueba de abrir la hoja
+    sheet_name = st.secrets["sheets"]["sheet_name"]
+    sh = client.open(sheet_name)
+    # MENSAJE DE ÉXITO ELIMINADO AQUÍ PARA QUE NO SALGA EN PANTALLA
+
+except Exception as e:
+    st.error(f"🔥 LA CONEXIÓN FALLÓ AQUÍ: {str(e)}")
+    st.stop()
 
 # ----------------------------------------------------------------
 ORDER_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
@@ -127,8 +143,6 @@ def apply_sorting_to_df(df):
         
     return df
 
-# (Nota: count_monthly_free_spots se eliminó de aquí porque ahora viene importada de database.py)
-
 # --- NUEVA FUNCIÓN CON ESTRATEGIAS DE ORDENAMIENTO ---
 def get_distribution_proposal(df_equipos, df_parametros, strategy="random"):
     """
@@ -161,8 +175,6 @@ def get_distribution_proposal(df_equipos, df_parametros, strategy="random"):
     rows, deficit_report = compute_distribution_from_excel(eq_proc, pa_proc, 2)
     
     return rows, deficit_report
-
-# (Nota: Funciones de borrado SQL eliminadas de aquí, importadas de database.py)
 
 def clean_reservation_df(df, tipo="puesto"):
     if df.empty: return df
@@ -209,7 +221,6 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
             except: pass
             
     if not found_any: return None
-    # MODIFICADO: Encoding explícito para evitar error de bytes
     return pdf.output(dest='S').encode('latin-1')
 
 def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=Path("static/logo.png"), deficit_data=None):
@@ -236,7 +247,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     # Tabla Diaria
     pdf.set_font("Arial", 'B', 9)
     widths = [30, 60, 25, 25, 25]
-    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"] # CAMBIADO
+    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"] 
     for w, h in zip(widths, headers): pdf.cell(w, 6, clean_pdf_text(h), 1)
     pdf.ln()
 
@@ -265,7 +276,6 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     # Cálculo del promedio semanal
     try:
         # Asegurar que trabajamos con números
-        # La columna viene como "%Distrib" desde app.py
         if "%Distrib" in distrib_df.columns:
             col_pct = "%Distrib"
         elif "pct" in distrib_df.columns:
@@ -383,7 +393,6 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             pdf.multi_cell(dw[6], line_height, causa, 1, 'L')
             pdf.set_xy(x_start, y_start + row_height)
 
-    # MODIFICADO: Encoding explícito
     return pdf.output(dest='S').encode('latin-1')
 
 # --- DIALOGOS MODALES ---
@@ -1024,4 +1033,3 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
-
