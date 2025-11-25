@@ -13,6 +13,9 @@ from PIL import Image as PILImage
 from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
+from PIL import Image
+from io import BytesIO
+import base64
 
 # ---------------------------------------------------------
 # 1. PARCHE PARA STREAMLIT >= 1.39
@@ -936,12 +939,24 @@ elif menu == "Administrador":
         if not pim.exists(): pim = PLANOS_DIR / f"piso {p_num}.jpg"
         
         if pim.exists():
-            img = PILImage.open(pim)
-            cw = 800; w, h = img.size
-            ch = int(h * (cw/w)) if w>cw else h
-            cw = w if w<=cw else cw
-            canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
-            
+            img = PILImage.open(pim)
+
+            # 1. Conversión
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            img_url = f"data:image/png;base64,{img_str}" # La URL que el navegador sí entiende
+
+            # 2. Cálculo de dimensiones
+            cw = 800; w, h = img.size
+            ch = int(h * (cw/w)) if w>cw else h
+            cw = w if w<=cw else cw
+
+            # 3. Llamada al Canvas con la URL
+            canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
+            # --- FIN DEL CÓDIGO DE CONVERSIÓN ---
+            
+            current_seats_dict = {}
             current_seats_dict = {}
             eqs = [""]
             if not df_d.empty:
@@ -1118,4 +1133,5 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+
 
