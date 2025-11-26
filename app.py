@@ -672,18 +672,25 @@ elif menu == "Administrador":
             # 1. Carga de imagen
             img = PILImage.open(pim)
             
-            cw = 800; w, h = img.size
-            ch = int(h * (cw/w)) if w>cw else h
-            cw = w if w<=cw else cw
+            # 2. Redimensionamiento MANUAL (para evitar el código roto de la librería)
+            cw_max = 800
+            w, h = img.size
+            
+            if w > cw_max:
+                ch = int(h * (cw_max / w))
+                cw = cw_max
+                img = img.resize((cw, ch), resample=PILImage.Resampling.LANCZOS)
+            else:
+                cw, ch = w, h
 
-            # 2. SOLUCIÓN ROBUSTA: Codificación a URL Base64 para eludir la función rota
-            # Esto es necesario porque el parche falló.
+            # 3. Solución Robusta: Codificación a URL Base64 para eludir la función rota
             buffered = BytesIO()
             img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             background_image_url = f"data:image/png;base64,{img_str}"
             
-            # 3. Llamada al Canvas usando la URL de datos
+            # 4. Llamada al Canvas usando SOLO la URL de datos y las dimensiones calculadas.
+            # Esta línea (702 original) ha sido modificada para no pasar el objeto img.
             canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=background_image_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
         
             current_seats_dict = {}
