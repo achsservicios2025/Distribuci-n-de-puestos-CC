@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import datetime
@@ -421,7 +422,7 @@ def generate_token(): return uuid.uuid4().hex[:8].upper()
 # ---------------------------------------------------------
 conn = get_conn()
 
-# MODIFICADO: Protección para no inicializar DB mil veces (Error 429)
+# MODIFICADO: Protección para no inicializar DB mil veces
 if "db_initialized" not in st.session_state:
     with st.spinner('Conectando a Google Sheets...'):
         init_db(conn)
@@ -436,7 +437,7 @@ if "app_settings" not in st.session_state:
 settings = st.session_state["app_settings"]
 
 # Definir variables
-site_title = settings.get("site_title", "Gestor de Puestos y Salas — ACHS Servicios")
+site_title = settings.get("site_title", "Gestor de Puestos y Salas")
 global_logo_path = settings.get("logo_path", "static/logo.png")
 
 if os.path.exists(global_logo_path):
@@ -620,7 +621,7 @@ elif menu == "Reservas":
         st.subheader("Agendar Sala")
         
         c_sala, c_fecha = st.columns(2)
-        sl = c_sala.selectbox("Selecciona Sala", ["Sala 1 (Piso 1)", "Sala 2 (Piso 2)", "Sala 3 (Piso 3)"])
+        sl = c_sala.selectbox("Selecciona Sala", ["Sala Grande Piso 1", "Sala Pequeña Piso 1", "Sala Piso 2", "Sala Piso 3"])
         pi_s = "Piso " + sl.split("Piso ")[1].replace(")", "")
         fe_s = c_fecha.date_input("Fecha", min_value=datetime.date.today(), key="fs")
         
@@ -1143,4 +1144,5 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+
 
