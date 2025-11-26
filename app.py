@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
-import base64 # Necesario para la solución estable de st_canvas
+import base64 # Requerido para la solución estable de st_canvas
 
 # ---------------------------------------------------------
 # 1. PARCHE DE COMPATIBILIDAD ELIMINADO
@@ -798,7 +798,7 @@ elif menu == "Administrador":
             tf = fpng if "PNG" in fmt_sel else fpdf
             mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
             if tf.exists():
-                with open(tf,"rb") as f: st.download_button(f"📥 Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True)
+                with open(tf,"rb") as f: st.download_button("📥 Descargar", f, tf.name, mm, use_container_width=True)
 
     with t3:
         st.subheader("Generar Reportes de Distribución")
@@ -866,4 +866,3 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
-            
