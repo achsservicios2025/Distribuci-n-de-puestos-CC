@@ -40,6 +40,7 @@ from modules.zones import generate_colored_plan, load_zones, save_zones, create_
 from modules.pdfgen import create_merged_pdf, generate_full_pdf, sort_floors, apply_sorting_to_df, clean_pdf_text
 
 # BLOQUE DE IMPORTACIÓN RESILIENTE PARA st_canvas
+# Esto evita que la aplicación falle por un simple ImportError.
 try:
     from streamlit_drawable_canvas_fix import st_canvas # Intentar importar el fix
 except ImportError:
@@ -552,9 +553,6 @@ elif menu == "Administrador":
                     c1.markdown("**Detalle de Conflictos:**")
                     c1.dataframe(def_df, use_container_width=True)
                     
-                    c2.markdown("**⚠️ Equipos más afectados (Repetición):**")
-                    c2.dataframe(conteo_injusticia, use_container_width=True)
-                    
                     if conteo_injusticia['Veces Perjudicado'].max() > 1:
                         c2.error("Hay equipos sufriendo déficit múltiples días. Se recomienda usar 'Auto-Optimizar'.")
                 else:
@@ -688,8 +686,6 @@ elif menu == "Administrador":
                 cw, ch = w, h
 
             # 3. Llamada al Canvas: Usamos el objeto PIL. 
-            # La librería "fix" (que asumimos está instalada) o la original 
-            # debería poder manejar el objeto PIL con las dimensiones explícitas.
             canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
         
             current_seats_dict = {}
@@ -870,3 +866,4 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+            
