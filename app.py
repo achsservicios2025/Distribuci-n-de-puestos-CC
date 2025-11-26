@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import datetime
@@ -15,6 +14,11 @@ from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
 import base64 
+
+# ---------------------------------------------------------
+# 1. PARCHE (ELIMINADO Y REEMPLAZADO POR SOLUCIÓN DIRECTA)
+# ---------------------------------------------------------
+# ---------------------------------------------------------
 
 # ---------------------------------------------------------
 # 2. IMPORTACIONES DE MÓDULOS (Consolidadas)
@@ -35,7 +39,7 @@ from modules.emailer import send_reservation_email
 from modules.rooms import generate_time_slots, check_room_conflict
 from modules.zones import generate_colored_plan, load_zones, save_zones, create_header_image 
 from modules.pdfgen import create_merged_pdf, generate_full_pdf, sort_floors, apply_sorting_to_df, clean_pdf_text
-from streamlit_drawable_canvas import st_canvas # Importación del módulo
+from streamlit_drawable_canvas import st_canvas
 
 # ---------------------------------------------------------
 # 3. CONFIGURACIÓN GENERAL
@@ -685,10 +689,8 @@ elif menu == "Administrador":
             img_str = base64.b64encode(buffered.getvalue()).decode()
             background_image_url = f"data:image/png;base64,{img_str}"
             
-            # 4. Llamada al Canvas usando SOLO la URL de datos. 
-            # ¡Se reintroducen width y height para que el canvas de Streamlit tenga el tamaño correcto en el frontend!
-            # La librería intentará usar estos parámetros, pero como ya no tiene el objeto PIL (solo el string URL),
-            # esperamos que caiga en una ruta de código más segura.
+            # 4. Llamada al Canvas: Se reintroducen width y height para que el widget sepa su tamaño.
+            # Esta es la configuración más estable, ya que la imagen ya está redimensionada.
             canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=background_image_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
         
             current_seats_dict = {}
