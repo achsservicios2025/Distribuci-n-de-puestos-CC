@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
-# REMOVIDO: import base64
+import base64
 
 # ---------------------------------------------------------
 # 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
@@ -937,7 +937,7 @@ elif menu == "Administrador":
         p_sel = c1.selectbox("Piso", pisos_list); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
         p_num = p_sel.replace("Piso ", "").strip()
         
-        # --- CÓDIGO CORREGIDO PARA LA CARGA DEL PLANO (SIN ESPACIO EN RUTA) ---
+        # --- CÓDIGO CORREGIDO PARA LA CARGA DEL PLANO ---
         
         # 1. Búsqueda de Archivo (Sin Espacio)
         file_base = f"piso{p_num}" # Genera 'piso2'
@@ -966,7 +966,7 @@ elif menu == "Administrador":
             cw = w if w<=cw else cw
 
             # 3. Llamada al Canvas con la URL
-            canvas = st_canvas(fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}")
+            canvas = st_canvas( fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}" )
             # --- FIN DEL CÓDIGO DE CONVERSIÓN ---
         
             current_seats_dict = {}
@@ -988,8 +988,7 @@ elif menu == "Administrador":
             
             if c3.button("Guardar", key="sz"):
                 if tn and canvas.json_data["objects"]:
-                    o = canvas.json_data["objects"][-1]
-                    zonas.setdefault(p_sel, []).append({"team": tn, "x": int(o["left"]), "y": int(o["top"]), "w": int(o["width"]*o.get("scaleX",1)), "h": int(o["height"]*o.get("scaleY",1)), "color": tc})
+                    o = canvas.json_data["objects"][-1] zonas.setdefault(p_sel, []).append({ "team": tn, "x": int(o.get("left", 0)), "y": int(o.get("top", 0)), "w": int(o.get("width", 0) * o.get("scaleX", 1)), "h": int(o.get("height", 0) * o.get("scaleY", 1)), "color": tc }) save_zones(zonas) st.success("OK")
                     save_zones(zonas); st.success("OK")
             
             st.divider()
@@ -1144,4 +1143,7 @@ elif menu == "Administrador":
     
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
+        if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+
+
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
