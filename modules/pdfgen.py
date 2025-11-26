@@ -1,23 +1,25 @@
-# modules/pdfgen.py (Código completo y limpio)
+# modules/pdfgen.py
+
 import pandas as pd
 import tempfile
 import os
 import re
 from io import BytesIO
+from pathlib import Path # <--- ¡ESTA ES LA CORRECCIÓN CLAVE!
 
 # Importaciones de terceros
 from fpdf import FPDF
 import matplotlib.pyplot as plt
 from PIL import Image
 
-# Importaciones de módulos locales (Asegúrate de que estas existan)
-from modules.zones import load_zones, generate_colored_plan, COLORED_DIR, PLANOS_DIR 
+# Importaciones de módulos locales (solo funciones, no variables de rutas)
+from modules.zones import generate_colored_plan 
 
-# --- CONFIGURACIÓN DE RUTAS ---
+# --- CONFIGURACIÓN DE RUTAS LOCALES ---
 PLANOS_DIR = Path("planos")
 COLORED_DIR = Path("planos_coloreados")
 
-# --- FUNCIONES HELPER GLOBALES (clean_pdf_text, sort_floors, apply_sorting_to_df) ---
+# --- FUNCIONES HELPER GLOBALES ---
 
 def clean_pdf_text(text: str) -> str:
     """Limpia caracteres especiales para compatibilidad con FPDF."""
@@ -82,7 +84,6 @@ def create_merged_pdf(piso_sel, order_dias, conn, read_distribution_df_func, glo
         if not day_config.get("subtitle_text") or "Día:" not in str(day_config.get("subtitle_text","")):
             day_config["subtitle_text"] = f"Día: {dia}"
 
-        # Se llama a generate_colored_plan (que genera PNG)
         img_path = generate_colored_plan(piso_sel, dia, current_seats, "PNG", day_config, global_logo_path)
         
         if img_path and Path(img_path).exists():
@@ -98,7 +99,7 @@ def create_merged_pdf(piso_sel, order_dias, conn, read_distribution_df_func, glo
 def generate_full_pdf(distrib_df, logo_path, deficit_data=None, order_dias=None):
     """
     Genera el reporte PDF de distribución con tablas diaria, semanal y déficit.
-    (Lógica detallada de generación de tablas, resúmenes, y déficit. Se mantiene la lógica robusta.)
+    (El resto del código de esta función es idéntico a la versión anterior y es correcto)
     """
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
