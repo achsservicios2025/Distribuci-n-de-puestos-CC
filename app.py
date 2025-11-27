@@ -310,9 +310,14 @@ def enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path):
         fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height)
 
 # Función de respaldo elegante
+# Función de respaldo elegante
 def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height):
     """Editor manual mejorado con vista previa interactiva"""
     
+    # --- CORRECCIÓN: Calcular p_num aquí dentro ---
+    p_num = p_sel.replace("Piso ", "").strip()
+    # ----------------------------------------------
+
     st.subheader("🎯 Modo de Dibujo Manual")
     
     # Mostrar la imagen con una cuadrícula de referencia
@@ -411,6 +416,101 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
         
         submitted = st.form_submit_button("💾 Guardar Zona", use_container_width=True)
         
+        if submitted and equipo:
+            zonas.setdefault(p_sel, []).append({
+                "team": equipo,
+                "x": x,
+                "y": y,
+                "w": w, 
+                "h": h,
+                "color": color
+            })
+            save_zones(zonas)
+            st.success("✅ Zona guardada exitosamente!")
+            st.rerun()
+
+    # Gestión de zonas existentes
+    st.subheader("📋 Zonas Existentes")
+    if p_sel in zonas and zonas[p_sel]:
+        for i, zona in enumerate(zonas[p_sel]):
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                
+                with col1:
+                    st.markdown(f"**{zona['team']}**")
+                    st.markdown(f"📍 `({zona['x']}, {zona['y']})` | 📏 `{zona['w']}×{zona['h']}`")
+                    st.markdown(f"🎨 <span style='color:{zona['color']}'>■ Color</span>", 
+                               unsafe_allow_html=True)
+                
+                with col2:
+                    # Mini vista previa de la zona
+                    mini_fig, mini_ax = plt.subplots(figsize=(3, 2))
+                    mini_ax.imshow(img)
+                    rect = plt.Rectangle(
+                        (zona['x'], zona['y']), zona['w'], zona['h'],
+                        linewidth=2, edgecolor=zona['color'], facecolor=zona['color'] + '40'
+                    )
+                    mini_ax.add_patch(rect)
+                    mini_ax.set_xlim(0, img_width)
+                    mini_ax.set_ylim(img_height, 0)  # Invertir Y para coordenadas de imagen
+                    mini_ax.axis('off')
+                    st.pyplot(mini_fig, use_container_width=True)
+                
+                with col3:
+                    if st.button("✏️ Editar", key=f"edit_{i}"):
+                        st.session_state.team_select_adv = zona['team']
+                        st.session_state.color_picker_adv = zona['color']
+                        st.session_state.x_pos = zona['x']
+                        st.session_state.y_pos = zona['y']
+                        st.session_state.width = zona['w']
+                        st.session_state.height = zona['h']
+                
+                with col4:
+                    if st.button("🗑️ Eliminar", key=f"del_{i}"):
+                        zonas[p_sel].pop(i)
+                        save_zones(zonas)
+                        st.rerun()
+    else:
+        st.info("No hay zonas definidas para este piso")
+
+    # Generar vista previa final
+    st.subheader("🎨 Vista Previa Final")
+    with st.expander("Configurar Estilos de Visualización", expanded=True):
+        col_style1, col_style2 = st.columns(2)
+        with col_style1:
+            titulo = st.text_input("Título del Plano", f"Distribución {p_sel}")
+            subtitulo = st.text_input("Subtítulo", f"Día: {d_sel}")
+        with col_style2:
+            bg_color = st.color_picker("Color de Fondo", "#FFFFFF")
+            text_color = st.color_picker("Color de Texto", "#000000")
+        
+        incluir_logo = st.checkbox("Incluir Logo", True)
+    
+    if st.button("🔄 Generar Vista Previa Completa", use_container_width=True):
+        conf = {
+            "title_text": titulo, 
+            "subtitle_text": subtitulo, 
+            "bg_color": bg_color, 
+            "title_color": text_color, 
+            "use_logo": incluir_logo
+        }
+        st.session_state['last_style_config'] = conf
+        
+        # Generar vista previa
+        current_seats_dict = {}
+        if not df_d.empty:
+            subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+            current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
+        
+        out = generate_colored_plan(p_sel, d_sel, current_seats_dict, "PNG", conf, global_logo_path)
+        if out: 
+            st.success("✅ Vista previa generada!")
+    
+    # Mostrar vista previa si existe
+    ds = d_sel.lower().replace("é", "e").replace("á", "a")
+    fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png" # <--- AHORA SÍ FUNCIONARÁ
+    if fpng.exists(): 
+        st.image(str(fpng), caption="Vista Previa Generada", use_column_width=True)        
         if submitted and equipo:
             zonas.setdefault(p_sel, []).append({
                 "team": equipo,
@@ -1813,6 +1913,7 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
 
 
 
