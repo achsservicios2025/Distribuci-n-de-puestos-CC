@@ -1208,42 +1208,43 @@ elif menu == "Administrador":
         if not pim.exists(): pim = PLANOS_DIR / f"{file_base}.jpg"
         if not pim.exists(): pim = PLANOS_DIR / f"Piso{p_num}.png"
 
+# ... (dentro de t2: Editor Visual) ...
+
         if pim.exists():
-            # SOLUCIÓN ACTUALIZADA: Usar base64 para la imagen de fondo
-            import base64
-            from io import BytesIO
-            
+            # Abrimos la imagen con PIL
             img = PILImage.open(pim)
             
-            cw = 800
+            # Lógica de redimensionamiento (MANTENER ESTO, es útil para que no se salga de pantalla)
+            cw = 800  # Ancho canvas deseado
             w, h = img.size
-            # Redimensionamiento simple
+            
             if w > cw:
                 ch = int(h * (cw / w))
+                # Redimensionamos el objeto PIL aquí mismo
                 img_resized = img.resize((cw, ch), PILImage.Resampling.LANCZOS)
             else:
                 cw = w
                 ch = h
                 img_resized = img
 
-            # Convertir imagen a base64
-            buffered = BytesIO()
-            img_resized.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            background_image_url = f"data:image/png;base64,{img_str}"
-
+            # --- CORRECCIÓN CLAVE ---
+            # 1. No convertimos a Base64.
+            # 2. Pasamos el OBJETO PIL directamente a background_image.
+            # 3. Pasamos width y height explícitos para asegurar que el canvas coincida.
+            
             canvas = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=2,
                 stroke_color="#00A04A",
-                background_image=background_image_url,  # Usar URL base64
+                background_image=img_resized, # <--- AQUÍ PASAMOS EL OBJETO, NO EL STRING
                 update_streamlit=True,
-                width=cw,
-                height=ch,
+                width=cw,     # Ancho calculado
+                height=ch,    # Alto calculado
                 drawing_mode="rect",
                 key=f"cv_{p_sel}"
             )
-            
+
+# ... (resto del código igual) ...            
             # El resto del código permanece igual...
             current_seats_dict = {}
             eqs = [""]
@@ -1356,3 +1357,4 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
