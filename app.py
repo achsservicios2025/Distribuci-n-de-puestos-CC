@@ -289,7 +289,7 @@ def calculate_weekly_usage_summary(distrib_df):
         elif 'cupos' in cl: cupos_col = col
         elif 'dia' in cl or 'día' in cl: dia_col = col
     if not all([equipo_col, cupos_col, dia_col]):
-        st.error("No se pudieron encontrar las columnas necesarias para el cálculo del resumen semanal")
+        st.error("No se pudieron encontrar las columnas necesarias")
         return pd.DataFrame()
     equipos_df = distrib_df[distrib_df[equipo_col] != "Cupos libres"]
     if equipos_df.empty: return pd.DataFrame()
@@ -321,7 +321,7 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
     p_num = piso_sel.replace("Piso ", "").strip()
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
-    found_any = False
+    found = False
     df = read_distribution_df(conn)
     base_config = st.session_state.get('last_style_config', {})
     for dia in ORDER_DIAS:
@@ -331,11 +331,11 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
         if not day_config.get("subtitle_text"): day_config["subtitle_text"] = f"Día: {dia}"
         img_path = generate_colored_plan(piso_sel, dia, current_seats, "PNG", day_config, global_logo_path)
         if img_path and Path(img_path).exists():
-            found_any = True
+            found = True
             pdf.add_page()
             try: pdf.image(str(img_path), x=10, y=10, w=190)
             except: pass
-    if not found_any: return None
+    if not found: return None
     try: return pdf.output(dest='S').encode('latin-1', 'replace')
     except: return pdf.output(dest='S')
 
@@ -354,7 +354,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.cell(0, 8, clean_pdf_text("1. Detalle de Distribución Diaria"), ln=True)
     pdf.set_font("Arial", 'B', 9)
     widths = [30, 60, 25, 25, 25]
-    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"]
+    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"] 
     for w, h in zip(widths, headers): pdf.cell(w, 6, clean_pdf_text(h), 1)
     pdf.ln()
     pdf.set_font("Arial", '', 9)
@@ -367,12 +367,13 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     for _, r in distrib_df.iterrows():
         pdf.cell(widths[0], 6, clean_pdf_text(get_val(r, ["Piso", "piso"])), 1)
         pdf.cell(widths[1], 6, clean_pdf_text(get_val(r, ["Equipo", "equipo"])[:40]), 1)
-        pdf.cell(widths[2], 6, clean_pdf_text(get_val(r, ["Día", "dia", "Dia"])), 1)
-        pdf.cell(widths[3], 6, clean_pdf_text(get_val(r, ["Cupos", "cupos", "Cupos asignados"])), 1)
+        pdf.cell(widths[2], 6, clean_pdf_text(get_val(r, ["Día", "dia"])), 1)
+        pdf.cell(widths[3], 6, clean_pdf_text(get_val(r, ["Cupos", "cupos"])), 1)
         pct_val = get_val(r, ["%Distrib", "pct"])
         pdf.cell(widths[4], 6, clean_pdf_text(f"{pct_val}%"), 1)
         pdf.ln()
     
+    # --- TABLA SEMANAL ---
     pdf.add_page()
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 10, clean_pdf_text("2. Resumen de Uso Semanal por Equipo"), ln=True)
@@ -401,6 +402,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         pdf.set_font("Arial", 'I', 9)
         pdf.cell(0, 6, clean_pdf_text(f"No se pudo calcular el resumen semanal: {str(e)}"), ln=True)
 
+    # --- GLOSARIO ---
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 10)
     pdf.cell(0, 8, clean_pdf_text("Glosario de Métricas y Cálculos:"), ln=True)
@@ -414,6 +416,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         pdf.set_x(10)
         pdf.multi_cell(185, 6, clean_pdf_text(nota))
 
+    # --- DÉFICIT ---
     if deficit_data and len(deficit_data) > 0:
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
@@ -421,11 +424,13 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         pdf.cell(0, 10, clean_pdf_text("Reporte de Déficit de Cupos"), ln=True, align='C')
         pdf.set_text_color(0, 0, 0)
         pdf.ln(5)
+        
         pdf.set_font("Arial", 'B', 8) 
         dw = [15, 45, 20, 15, 15, 15, 65]
         dh = ["Piso", "Equipo", "Día", "Dot.", "Mín.", "Falt.", "Causa Detallada"]
         for w, h in zip(dw, dh): pdf.cell(w, 8, clean_pdf_text(h), 1, 0, 'C')
         pdf.ln()
+        
         pdf.set_font("Arial", '', 8)
         for d in deficit_data:
             piso = clean_pdf_text(d.get('piso',''))
@@ -503,11 +508,21 @@ def create_plotly_office_viz(p_sel, d_sel, zonas, df_d):
         for i, zona in enumerate(zonas[p_sel]):
             color = zona.get('color', colors[i % len(colors)])
             
+            # --- ARREGLO DEL COLOR TRANSPARENTE (HEX -> RGBA) ---
+            # Esto evita el ValueError en Plotly
+            c_hex = color.lstrip('#')
+            if len(c_hex) == 6:
+                rgb = tuple(int(c_hex[i:i+2], 16) for i in (0, 2, 4))
+                rgba_fill = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, 0.6)"
+            else:
+                rgba_fill = color # Fallback si no es hex estándar
+            
+            # Rectángulo de la zona
             fig.add_trace(go.Scatter(
                 x=[zona['x'], zona['x'] + zona['w'], zona['x'] + zona['w'], zona['x'], zona['x']],
                 y=[zona['y'], zona['y'], zona['y'] + zona['h'], zona['y'] + zona['h'], zona['y']],
                 fill="toself",
-                fillcolor=f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.6)',
+                fillcolor=rgba_fill,
                 line=dict(color=color, width=2),
                 name=zona['team'],
                 text=zona['team'],
@@ -516,6 +531,7 @@ def create_plotly_office_viz(p_sel, d_sel, zonas, df_d):
                 showlegend=True
             ))
             
+            # Texto en el centro
             fig.add_annotation(
                 x=zona['x'] + zona['w']/2,
                 y=zona['y'] + zona['h']/2,
@@ -531,7 +547,7 @@ def create_plotly_office_viz(p_sel, d_sel, zonas, df_d):
     fig.update_layout(
         title=f"Distribución - {p_sel}",
         xaxis=dict(visible=False, range=[0, 1000], autorange=False),
-        yaxis=dict(visible=False, range=[1000, 0], autorange=False),
+        yaxis=dict(visible=False, range=[1000, 0], autorange=False), # Invertido
         plot_bgcolor='white',
         paper_bgcolor='white',
         font=dict(family="Arial", size=12),
@@ -546,6 +562,7 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
     """Lógica del editor moderno con sliders"""
     st.subheader("✨ Crear Nueva Zona")
     
+    # Key única para el formulario
     with st.form(f"modern_editor_form_{p_sel}_{d_sel}"):
         col1, col2 = st.columns(2)
         
@@ -564,6 +581,7 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
             elif "3" in p_sel: salas_piso = ["Sala Reuniones Piso 3"]
             eqs = eqs + salas_piso
             
+            # Key única
             equipo = st.selectbox("Equipo/Sala", eqs, key=f"mod_team_{p_sel}", label_visibility="collapsed")
             
             if equipo and equipo in current_seats_dict:
@@ -571,6 +589,7 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
         
         with col2:
             st.markdown("**Personaliza el Estilo**")
+            # Key única
             color = st.color_picker("Color de la zona", "#00A04A", key=f"mod_color_{p_sel}", label_visibility="collapsed")
     
         st.subheader("📏 Dimensiones y Posición")
@@ -580,22 +599,35 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
             st.markdown("**Configura las Dimensiones**")
             col_x, col_y = st.columns(2)
             with col_x:
+                # Key única
                 x = st.slider("Posición X", 0, 900, 100, 10, key=f"mod_x_{p_sel}", help="Posición horizontal")
             with col_y:
+                # Key única
                 y = st.slider("Posición Y", 0, 900, 100, 10, key=f"mod_y_{p_sel}", help="Posición vertical")
             
             col_w, col_h = st.columns(2)
             with col_w:
+                # Key única
                 w = st.slider("Ancho", 50, 500, 150, 10, key=f"mod_w_{p_sel}", help="Ancho del área")
             with col_h:
+                # Key única
                 h = st.slider("Alto", 50, 500, 100, 10, key=f"mod_h_{p_sel}", help="Alto del área")
         
         with col_preview:
             st.markdown("**Vista Previa**")
+            
+            # --- ARREGLO DEL COLOR (HEX -> RGBA) ---
+            c_hex = color.lstrip('#')
+            if len(c_hex) == 6:
+                rgb = tuple(int(c_hex[i:i+2], 16) for i in (0, 2, 4))
+                rgba_preview = f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, 0.6)"
+            else:
+                rgba_preview = color
+
             preview_fig = go.Figure()
             preview_fig.add_trace(go.Scatter(
                 x=[0, w, w, 0, 0], y=[0, 0, h, h, 0],
-                fill="toself", fillcolor=color + '80',
+                fill="toself", fillcolor=rgba_preview,
                 line=dict(color=color, width=2), mode='lines'
             ))
             preview_fig.update_layout(
@@ -617,6 +649,7 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
             else:
                 st.error("⚠️ Por favor selecciona un equipo o sala")
 
+    # Listado para borrar
     if p_sel in zonas and zonas[p_sel]:
         st.divider()
         st.markdown("#### 📋 Zonas Existentes")
@@ -630,7 +663,9 @@ def modern_zone_editor_logic(p_sel, d_sel, zonas, df_d):
                     st.rerun()
 
 def show_zone_analytics(p_sel, zonas, df_d):
+    """Muestra analytics visuales de las zonas"""
     st.subheader("📈 Analytics de Espacios")
+    
     if p_sel not in zonas or not zonas[p_sel]:
         st.info("No hay zonas definidas para mostrar analytics.")
         return
@@ -658,7 +693,11 @@ def show_zone_analytics(p_sel, zonas, df_d):
     st.plotly_chart(fig_bar, use_container_width=True)
 
 def modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path):
+    """Diseñador moderno de zonas con interfaz atractiva (OPCIÓN 3)"""
+    
     st.title("🎨 Diseñador de Espacios de Trabajo")
+    
+    # Header con información
     with st.container():
         col1, col2, col3 = st.columns(3)
         with col1: st.info(f"**Piso:** {p_sel}")
@@ -667,10 +706,13 @@ def modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path):
             count = len(zonas[p_sel]) if p_sel in zonas else 0
             st.info(f"**Zonas:** {count}")
     
+    # Pestañas para diferentes vistas
     tab1, tab2, tab3 = st.tabs(["🏢 Vista 2D", "📐 Editor", "📊 Analytics"])
     
     with tab1:
         create_plotly_office_viz(p_sel, d_sel, zonas, df_d)
+        
+        # PDF Generation Section inside Tab 1
         st.divider()
         st.markdown("### Exportar Vista")
         with st.expander("Configurar PDF"):
@@ -684,7 +726,9 @@ def modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path):
                 subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
                 current_seats = dict(zip(subset['equipo'], subset['cupos']))
             
+            # Usamos el generador antiguo para el PDF físico (que requiere imagen)
             generate_colored_plan(p_sel, d_sel, current_seats, "PNG", conf, global_logo_path)
+            
             p_num = p_sel.replace("Piso ", "").strip()
             ds = d_sel.lower().replace("é", "e").replace("á", "a")
             fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
@@ -763,8 +807,10 @@ if menu == "Vista pública":
             p_sel = c1.selectbox("Selecciona Piso", pisos_disponibles)
             ds = c2.selectbox("Selecciona Día", ["Todos (Lunes a Viernes)"] + ORDER_DIAS)
             
-            zonas = load_zones()
+            # --- INTEGRACIÓN OPCIÓN 3 EN VISTA PÚBLICA ---
+            zonas = load_zones() # Cargar zonas
             if ds != "Todos (Lunes a Viernes)":
+                # Usamos la visualización moderna de Plotly
                 create_plotly_office_viz(p_sel, ds, zonas, df_view)
             
             st.write("---")
@@ -780,9 +826,12 @@ if menu == "Vista pública":
             weekly_summary = calculate_weekly_usage_summary(df_view)
             if not weekly_summary.empty:
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
+                
+                # Mostrar métricas generales
                 col1, col2, col3 = st.columns(3)
-                with col1: st.metric("Total Equipos", len(weekly_summary))
-                with col2: 
+                with col1:
+                    st.metric("Total Equipos", len(weekly_summary))
+                with col2:
                     total_cupos = weekly_summary['Total Cupos Semanales'].sum()
                     st.metric("Total Cupos Semanales", int(total_cupos))
                 with col3:
@@ -862,6 +911,7 @@ elif menu == "Reservas":
         st.subheader("Agendar Sala")
         c_sala, c_fecha = st.columns(2)
         
+        # ACTUALIZADO: Nuevas opciones de salas
         salas_opciones = [
             "Sala Reuniones Pequeña Piso 1",
             "Sala Reuniones Grande Piso 1", 
@@ -871,10 +921,15 @@ elif menu == "Reservas":
         
         sl = c_sala.selectbox("Selecciona Sala", salas_opciones)
         
-        if "Piso 1" in sl: pi_s = "Piso 1"
-        elif "Piso 2" in sl: pi_s = "Piso 2" 
-        elif "Piso 3" in sl: pi_s = "Piso 3"
-        else: pi_s = "Piso 1"
+        # Extraer piso basado en la sala seleccionada
+        if "Piso 1" in sl:
+            pi_s = "Piso 1"
+        elif "Piso 2" in sl:
+            pi_s = "Piso 2" 
+        elif "Piso 3" in sl:
+            pi_s = "Piso 3"
+        else:
+            pi_s = "Piso 1"  # Valor por defecto
         
         fe_s = c_fecha.date_input("Fecha", min_value=datetime.date.today(), key="fs")
         tm = generate_time_slots("08:00", "20:00", 15)
@@ -905,7 +960,9 @@ elif menu == "Reservas":
         q = st.text_input("Ingresa tu Correo o Nombre para buscar:")
         
         if q:
+            # CORRECCIÓN KEY ERROR: Limpiamos y normalizamos los DFs antes de filtrar
             dp = clean_reservation_df(list_reservations_df(conn), "puesto")
+            # Buscar en columnas normalizadas 'Nombre' o 'Correo'
             if not dp.empty and 'Nombre' in dp.columns and 'Correo' in dp.columns:
                 mp = dp[(dp['Nombre'].str.lower().str.contains(q.lower())) | (dp['Correo'].str.lower().str.contains(q.lower()))]
             else: mp = pd.DataFrame()
@@ -980,6 +1037,7 @@ elif menu == "Administrador":
         c_up, c_strat = st.columns([2, 1])
         up = c_up.file_uploader("Subir archivo Excel (Hojas: 'Equipos', 'Parámetros')", type=["xlsx"])
         
+        # NUEVO: Checkbox para ignorar parámetros
         ignore_params = st.checkbox("🎯 Ignorar hoja de parámetros y generar distribución ideal", 
                                        help="Genera distribuciones optimizadas sin restricciones de capacidad")
         
@@ -1004,6 +1062,7 @@ elif menu == "Administrador":
         if 'proposal_rows' not in st.session_state: st.session_state['proposal_rows'] = None
         if 'proposal_deficit' not in st.session_state: st.session_state['proposal_deficit'] = None
         if 'last_optimization_stats' not in st.session_state: st.session_state['last_optimization_stats'] = None
+        # NUEVO: Para almacenar múltiples opciones
         if 'multiple_proposals' not in st.session_state: st.session_state['multiple_proposals'] = []
 
         if up:
@@ -1012,8 +1071,11 @@ elif menu == "Administrador":
                     df_eq = pd.read_excel(up, "Equipos")
                     
                     if ignore_params:
+                        # Generar múltiples propuestas ideales
                         st.session_state['excel_equipos'] = df_eq
                         st.session_state['excel_params'] = None
+                        
+                        # Generar 3 opciones diferentes
                         proposals = []
                         for i in range(3):
                             rows, deficit = get_ideal_distribution_proposal(df_eq, strategy=sel_strat_code, variant=i)
@@ -1023,41 +1085,60 @@ elif menu == "Administrador":
                                 'name': f"Opción {i+1} - {estrategia}",
                                 'stats': calculate_distribution_stats(rows, df_eq)
                             })
+                        
                         st.session_state['multiple_proposals'] = proposals
                         st.session_state['proposal_rows'] = proposals[0]['rows']
                         st.session_state['proposal_deficit'] = proposals[0]['deficit']
+                        
                     else:
+                        # Comportamiento original
                         df_pa = pd.read_excel(up, "Parámetros")
                         st.session_state['excel_equipos'] = df_eq
                         st.session_state['excel_params'] = df_pa
                         rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code)
                         st.session_state['proposal_rows'] = rows
                         st.session_state['proposal_deficit'] = deficit
-                        st.session_state['multiple_proposals'] = []
+                        st.session_state['multiple_proposals'] = []  # Limpiar propuestas múltiples
+                        
                     st.rerun()
+                    
             except Exception as e: 
                 st.error(f"Error al leer el Excel: {e}")
 
         if st.session_state['proposal_rows'] is not None:
             st.divider()
+            
+            # MOSTRAR OPCIONES MÚLTIPLES SI EXISTEN
             if st.session_state['multiple_proposals'] and len(st.session_state['multiple_proposals']) > 1:
                 st.subheader("🎯 Opciones de Distribución Generadas")
+                
+                # Mostrar estadísticas comparativas
                 cols = st.columns(len(st.session_state['multiple_proposals']))
+                
                 for idx, proposal in enumerate(st.session_state['multiple_proposals']):
                     with cols[idx]:
                         stats = proposal['stats']
-                        st.metric(label=proposal['name'], value=f"{stats['total_cupos_asignados']} cupos", delta=f"{stats['cupos_libres']} libres")
+                        st.metric(
+                            label=proposal['name'],
+                            value=f"{stats['total_cupos_asignados']} cupos",
+                            delta=f"{stats['cupos_libres']} libres"
+                        )
                         st.caption(f"Uniformidad: {stats['uniformidad']:.1f}")
                         st.caption(f"Déficits: {stats['equipos_con_deficit']}")
+                        
                         if st.button(f"Seleccionar Opción {idx+1}", key=f"select_{idx}", use_container_width=True):
                             st.session_state['proposal_rows'] = proposal['rows']
                             st.session_state['proposal_deficit'] = proposal['deficit']
                             st.rerun()
+                
                 st.markdown("---")
             
+            # CONTINUAR CON LA VISUALIZACIÓN NORMAL
             n_def = len(st.session_state['proposal_deficit']) if st.session_state['proposal_deficit'] else 0
-            if n_def == 0: st.success("✅ **¡Distribución Perfecta!** 0 conflictos detectados.")
-            else: st.warning(f"⚠️ **Distribución Actual:** {n_def} cupos faltantes en total.")
+            if n_def == 0: 
+                st.success("✅ **¡Distribución Perfecta!** 0 conflictos detectados.")
+            else: 
+                st.warning(f"⚠️ **Distribución Actual:** {n_def} cupos faltantes en total.")
 
             t_view, t_def = st.tabs(["📊 Distribución Visual", "🚨 Reporte de Conflictos"])
             with t_view:
@@ -1065,8 +1146,11 @@ elif menu == "Administrador":
                 if not df_preview.empty:
                     st.dataframe(apply_sorting_to_df(df_preview), hide_index=True, use_container_width=True)
                 else: st.warning("No se generaron asignaciones.")
+                
+                # AGREGAR: Mostrar insights si es distribución ideal
                 if st.session_state.get('multiple_proposals'):
                     show_distribution_insights(st.session_state['proposal_rows'], st.session_state['proposal_deficit'])
+                    
             with t_def:
                 if st.session_state['proposal_deficit']:
                     def_df = pd.DataFrame(st.session_state['proposal_deficit'])
@@ -1078,24 +1162,37 @@ elif menu == "Administrador":
             if c_actions[0].button("🔄 Probar otra suerte"):
                 with st.spinner("Generando..."):
                     if st.session_state.get('multiple_proposals'):
+                        # En modo ideal, generar nuevas opciones
                         proposals = []
                         for i in range(3):
-                            rows, deficit = get_ideal_distribution_proposal(st.session_state['excel_equipos'], strategy=sel_strat_code, variant=i+3)
+                            rows, deficit = get_ideal_distribution_proposal(
+                                st.session_state['excel_equipos'], 
+                                strategy=sel_strat_code, 
+                                variant=i+3  # Cambiar variante para nuevas opciones
+                            )
                             proposals.append({
-                                'rows': rows, 'deficit': deficit, 'name': f"Opción {i+1} - {estrategia}",
+                                'rows': rows,
+                                'deficit': deficit,
+                                'name': f"Opción {i+1} - {estrategia}",
                                 'stats': calculate_distribution_stats(rows, st.session_state['excel_equipos'])
                             })
                         st.session_state['multiple_proposals'] = proposals
                         st.session_state['proposal_rows'] = proposals[0]['rows']
                         st.session_state['proposal_deficit'] = proposals[0]['deficit']
                     else:
-                        rows, deficit = get_distribution_proposal(st.session_state['excel_equipos'], st.session_state['excel_params'], strategy=sel_strat_code)
+                        # Comportamiento original
+                        rows, deficit = get_distribution_proposal(
+                            st.session_state['excel_equipos'], 
+                            st.session_state['excel_params'], 
+                            strategy=sel_strat_code
+                        )
                         st.session_state['proposal_rows'] = rows
                         st.session_state['proposal_deficit'] = deficit
                 st.rerun()
             
             if c_actions[1].button("✨ Auto-Optimizar"):
                 if st.session_state.get('multiple_proposals'):
+                    # En modo ideal, no aplica la optimización por déficit
                     st.info("En modo ideal, la distribución ya está optimizada.")
                 else:
                     NUM_INTENTOS = 20; my_bar = st.progress(0, text="Optimizando...")
@@ -1116,6 +1213,7 @@ elif menu == "Administrador":
                 st.success("Guardado."); st.balloons(); st.rerun()
 
     with t2:
+        # REEMPLAZADO: Usamos el editor moderno con Plotly
         zonas = load_zones()
         c1, c2 = st.columns(2)
         df_d = read_distribution_df(conn)
@@ -1123,7 +1221,7 @@ elif menu == "Administrador":
         p_sel = c1.selectbox("Piso", pisos_list)
         d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
         
-        # EDITOR MODERNO (OPCIÓN 3)
+        # Llamar al editor simplificado
         modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path)
 
     with t3:
@@ -1151,6 +1249,8 @@ elif menu == "Administrador":
         
     with t6:
         st.subheader("Opciones de Mantenimiento")
+        
+        # ACTUALIZADO: Más opciones de borrado
         opcion_borrado = st.selectbox(
             "Selecciona qué deseas borrar:",
             ["Reservas", "Distribución", "Planos/Zonas", "TODO"]
