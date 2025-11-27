@@ -310,11 +310,11 @@ def enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path):
         fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height)
 
 # Función de respaldo elegante
-# Función de respaldo elegante (CORREGIDA CON KEYS ÚNICAS)
+# Función de respaldo elegante (CORREGIDA CON KEYS ÚNICAS)# Función de respaldo elegante (VERSIÓN CORREGIDA FINAL)
 def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height):
     """Editor manual mejorado con vista previa interactiva"""
     
-    # Calcular p_num (Necesario para el nombre del archivo al final)
+    # Calcular p_num aquí para evitar errores de variable no definida
     p_num = p_sel.replace("Piso ", "").strip()
 
     st.subheader("🎯 Modo de Dibujo Manual")
@@ -347,7 +347,7 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
     # Controles de dibujo mejorados
     st.subheader("🖊️ Agregar Nueva Zona")
     
-    # CORRECCIÓN: Key única para el formulario basada en el piso
+    # IMPORTANTE: Key única para el formulario
     with st.form(f"zona_form_advanced_{p_sel}"):
         col1, col2 = st.columns(2)
         
@@ -366,7 +366,7 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
             elif "3" in p_sel: salas_piso = ["Sala Reuniones Piso 3"]
             eqs = eqs + salas_piso
             
-            # CORRECCIÓN: Keys únicas para inputs
+            # IMPORTANTE: Keys únicas para inputs
             equipo = st.selectbox("Equipo / Sala", eqs, key=f"team_select_adv_{p_sel}")
             color = st.color_picker("Color de la Zona", "#00A04A", key=f"color_picker_adv_{p_sel}")
             
@@ -453,12 +453,11 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
                     )
                     mini_ax.add_patch(rect)
                     mini_ax.set_xlim(0, img_width)
-                    mini_ax.set_ylim(img_height, 0)  # Invertir Y para coordenadas de imagen
+                    mini_ax.set_ylim(img_height, 0)
                     mini_ax.axis('off')
                     st.pyplot(mini_fig, use_container_width=True)
                 
                 with col3:
-                    # Keys únicas para botones de edición
                     if st.button("✏️ Editar", key=f"edit_{p_sel}_{i}"):
                         st.session_state.team_select_adv = zona['team']
                         st.session_state.color_picker_adv = zona['color']
@@ -468,7 +467,6 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
                         st.session_state.height = zona['h']
                 
                 with col4:
-                    # Keys únicas para botones de borrar
                     if st.button("🗑️ Eliminar", key=f"del_{p_sel}_{i}"):
                         zonas[p_sel].pop(i)
                         save_zones(zonas)
@@ -481,7 +479,7 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
     with st.expander("Configurar Estilos de Visualización", expanded=True):
         col_style1, col_style2 = st.columns(2)
         with col_style1:
-            # CORRECCIÓN: Aquí es donde fallaba, agregamos key única
+            # AQUÍ ESTABA EL ERROR: Agregamos keys únicas para que no choquen
             titulo = st.text_input("Título del Plano", f"Distribución {p_sel}", key=f"tit_man_{p_sel}")
             subtitulo = st.text_input("Subtítulo", f"Día: {d_sel}", key=f"sub_man_{p_sel}")
         with col_style2:
@@ -514,7 +512,8 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
     ds = d_sel.lower().replace("é", "e").replace("á", "a")
     fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
     if fpng.exists(): 
-        st.image(str(fpng), caption="Vista Previa Generada", use_column_width=True)        
+        st.image(str(fpng), caption="Vista Previa Generada", use_column_width=True)  
+        
         if submitted and equipo:
             zonas.setdefault(p_sel, []).append({
                 "team": equipo,
@@ -2012,6 +2011,7 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
 
 
 
