@@ -17,10 +17,37 @@ import base64
 import numpy as np
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN SIMPLIFICADA - ELIMINAMOS EL PARCHE COMPLEJO
 # ---------------------------------------------------------
-# Eliminamos el parche problemático y usamos una solución más simple
+# 1. PARCHE DE COMPATIBILIDAD (Reforzado para Streamlit 1.51+)
+# ---------------------------------------------------------
+import streamlit as st
+import streamlit.elements.image as st_image
+from dataclasses import dataclass
 
+# Intentamos "secuestrar" la función image_to_url de donde vive ahora
+# para inyectarla donde st_canvas la está buscando.
+try:
+    # Intento 1: Ubicación moderna (Streamlit 1.39 - 1.51+)
+    from streamlit.elements.lib.image_utils import image_to_url as _internal_image_to_url
+except ImportError:
+    try:
+        # Intento 2: Ubicación intermedia
+        from streamlit.runtime.media_file_storage import image_to_url as _internal_image_to_url
+    except ImportError:
+        # Fallback: Definir función vacía si todo falla (evita crash, aunque no muestre imagen)
+        def _internal_image_to_url(image, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None):
+            return ""
+
+# INYECCIÓN: Si st_image no tiene la función, se la ponemos manualmente
+if not hasattr(st_image, 'image_to_url'):
+    st_image.image_to_url = _internal_image_to_url
+
+# Parche adicional para el objeto WidthConfig que también suele faltar
+if not hasattr(st_image, 'WidthConfig'):
+    @dataclass
+    class WidthConfig:
+        width: int
+    st_image.WidthConfig = WidthConfig
 # ---------------------------------------------------------
 # 2. IMPORTACIONES DE MÓDULOS
 # ---------------------------------------------------------
@@ -672,15 +699,34 @@ def simple_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path):
     pim = PLANOS_DIR / f"{file_base}.png"
     if not pim.exists(): pim = PLANOS_DIR / f"{file_base}.jpg"
     if not pim.exists(): pim = PLANOS_DIR / f"Piso{p_num}.png"
-
+    
     if pim.exists():
-        # Mostrar imagen del plano
-        img = PILImage.open(pim)
-        st.image(img, caption=f"Plano del {p_sel}", use_column_width=True)
-        
-        # Obtener dimensiones de la imagen para referencia
-        img_width, img_height = img.size
-        st.caption(f"Dimensiones de referencia: {img_width} x {img_height} píxeles")
+            # Abrir imagen con PIL
+            img = PILImage.open(pim)
+            
+            # Tu lógica de redimensionamiento (MANTENLA)
+            cw = 800
+            w, h = img.size
+            if w > cw:
+                ch = int(h * (cw / w))
+                img_resized = img.resize((cw, ch), PILImage.Resampling.LANCZOS)
+            else:
+                cw = w
+                ch = h
+                img_resized = img
+
+            # Canvas usando el objeto de imagen DIRECTO
+            canvas = st_canvas(
+                fill_color="rgba(0, 160, 74, 0.3)",
+                stroke_width=2,
+                stroke_color="#00A04A",
+                background_image=img_resized, # <--- OBJETO PIL (Gracias al parche, esto funcionará)
+                update_streamlit=True,
+                width=cw,
+                height=ch,
+                drawing_mode="rect",
+                key=f"cv_{p_sel}"
+            )
     
     # Formulario para agregar zonas
     st.subheader("➕ Agregar Nueva Zona")
@@ -1349,3 +1395,4 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
