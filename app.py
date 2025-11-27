@@ -940,7 +940,7 @@ elif menu == "Administrador":
                     st.error(f"Error al guardar: {e}")
 
     # -----------------------------------------------------------
-    # T2: EDITOR VISUAL (BLOQUE CORREGIDO: INDENTACIÓN Y SINTAXIS)
+    # T2: EDITOR VISUAL (BLOQUE CORREGIDO: SE PASA OBJETO IMAGEN, NO TEXTO)
     # -----------------------------------------------------------
     with t2:
         st.info("Editor de Zonas")
@@ -964,20 +964,19 @@ elif menu == "Administrador":
             pim = PLANOS_DIR / f"Piso{p_num}.png"
 
         if pim.exists():
-            img = PILImage.open(pim) # Abrimos la imagen como objeto PIL
+            img = PILImage.open(pim) # <-- AQUI SE CARGA LA IMAGEN REAL
 
-            # Calculamos las dimensiones para mostrar
             cw = 800
             w, h = img.size
             ch = int(h * (cw / w)) if w > cw else h
             cw = w if w <= cw else cw
 
-            # Pasamos 'img' directamente (el objeto), NO 'img_url'
+            # Pasamos 'img' (el objeto PIL) al canvas, NO el string base64
             canvas = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=2,
                 stroke_color="#00A04A",
-                background_image=img,  # <--- CAMBIO CLAVE: Pasamos el objeto PIL
+                background_image=img,  # <--- CAMBIO CLAVE AQUÍ
                 update_streamlit=True,
                 width=cw,
                 height=ch,
@@ -1111,9 +1110,8 @@ elif menu == "Administrador":
 
             if fpng.exists():
                 st.image(str(fpng), width=550, caption="Vista Previa")
-            elif fpdf.exists(): # <-- SINTAXIS CORREGIDA
+            elif fpdf.exists():
                 st.info("Vista previa generada. Se muestra el botón de descarga.")
-            # Si no existe, no se hace nada, o se podría poner un st.warning()
             
     # -----------------------------------------------------------
     # T3: INFORMES
@@ -1194,5 +1192,3 @@ elif menu == "Administrador":
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         # El doble botón "BORRAR" al final de tu código original ha sido consolidado en uno solo.
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
-
-
