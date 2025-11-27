@@ -14,6 +14,7 @@ from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
 import base64
+import numpy as np
 
 # ---------------------------------------------------------
 # 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
@@ -152,6 +153,279 @@ def get_distribution_proposal(df_equipos, df_parametros, strategy="random"):
 
     rows, deficit_report = compute_distribution_from_excel(eq_proc, pa_proc, 2)
     return rows, deficit_report
+
+# NUEVAS FUNCIONES PARA DISTRIBUCIÓN IDEAL
+def get_ideal_distribution_proposal(df_equipos, strategy="perfect_equity", variant=0):
+    """
+    Genera distribuciones ideales sin restricciones de parámetros
+    """
+    df_eq_proc = df_equipos.copy()
+    
+    # Obtener dotación total por equipo
+    dotacion_col = None
+    for col in df_eq_proc.columns:
+        if col.lower() in ['dotacion', 'dotación', 'total', 'empleados']:
+            dotacion_col = col
+            break
+    
+    if dotacion_col is None:
+        # Si no encontramos dotación, usar la primera columna numérica
+        numeric_cols = df_eq_proc.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            dotacion_col = numeric_cols[0]
+        else:
+            # Último recurso: usar segunda columna asumiendo estructura estándar
+            dotacion_col = df_eq_proc.columns[1] if len(df_eq_proc.columns) > 1 else df_eq_proc.columns[0]
+    
+    # Obtener nombres de equipos
+    equipo_col = None
+    for col in df_eq_proc.columns:
+        if col.lower() in ['equipo', 'team', 'departamento', 'área']:
+            equipo_col = col
+            break
+    if equipo_col is None:
+        equipo_col = df_eq_proc.columns[0]
+    
+    equipos = df_eq_proc[equipo_col].tolist()
+    dotaciones = df_eq_proc[dotacion_col].tolist()
+    
+    # Estrategias de distribución
+    if strategy == "perfect_equity":
+        return perfect_equity_distribution(equipos, dotaciones, variant)
+    elif strategy == "balanced_flex":
+        return balanced_flex_distribution(equipos, dotaciones, variant)
+    elif strategy == "controlled_random":
+        return controlled_random_distribution(equipos, dotaciones, variant)
+    else:
+        return perfect_equity_distribution(equipos, dotaciones, variant)
+
+def perfect_equity_distribution(equipos, dotaciones, variant=0):
+    """
+    Distribución perfectamente equitativa entre los 5 días
+    """
+    rows = []
+    deficit_report = []
+    
+    # Pisos disponibles (asumimos 3 pisos como ejemplo)
+    pisos = ["Piso 1", "Piso 2", "Piso 3"]
+    
+    for i, (equipo, dotacion) in enumerate(zip(equipos, dotaciones)):
+        # Distribuir equitativamente entre los 5 días
+        base_cupos = dotacion // 5
+        resto = dotacion % 5
+        
+        for j, dia in enumerate(ORDER_DIAS):
+            # Asignar piso de manera balanceada
+            piso = pisos[i % len(pisos)]
+            
+            # Distribuir el resto equitativamente
+            cupos_dia = base_cupos + (1 if j < resto else 0)
+            
+            rows.append({
+                'piso': piso,
+                'equipo': equipo,
+                'dia': dia,
+                'cupos': cupos_dia,
+                'dotacion_total': dotacion
+            })
+    
+    # Agregar cupos libres (10% del total)
+    total_cupos = sum(dotaciones)
+    cupos_libres_por_dia = max(1, total_cupos // 50)  # ~2% por día como flex
+    
+    for piso in pisos:
+        for dia in ORDER_DIAS:
+            rows.append({
+                'piso': piso,
+                'equipo': "Cupos libres",
+                'dia': dia,
+                'cupos': cupos_libres_por_dia,
+                'dotacion_total': cupos_libres_por_dia * 5
+            })
+    
+    return rows, deficit_report
+
+def balanced_flex_distribution(equipos, dotaciones, variant=0):
+    """
+    Distribución balanceada con énfasis en flexibilidad
+    """
+    rows = []
+    deficit_report = []
+    
+    pisos = ["Piso 1", "Piso 2", "Piso 3"]
+    
+    for i, (equipo, dotacion) in enumerate(zip(equipos, dotaciones)):
+        # Estrategia: 80% distribuido equitativamente, 20% como flex
+        cupos_fijos = int(dotacion * 0.8)
+        base_cupos = cupos_fijos // 5
+        resto_fijos = cupos_fijos % 5
+        
+        for j, dia in enumerate(ORDER_DIAS):
+            piso = pisos[(i + variant) % len(pisos)]  # Variar por opción
+            
+            cupos_dia = base_cupos + (1 if j < resto_fijos else 0)
+            
+            rows.append({
+                'piso': piso,
+                'equipo': equipo,
+                'dia': dia,
+                'cupos': cupos_dia,
+                'dotacion_total': dotacion
+            })
+    
+    # Cupos libres más generosos (15% del total)
+    total_cupos = sum(dotaciones)
+    cupos_libres_por_dia = max(2, total_cupos // 30)  # ~3.3% por día
+    
+    for piso in pisos:
+        for dia in ORDER_DIAS:
+            rows.append({
+                'piso': piso,
+                'equipo': "Cupos libres",
+                'dia': dia,
+                'cupos': cupos_libres_por_dia,
+                'dotacion_total': cupos_libres_por_dia * 5
+            })
+    
+    return rows, deficit_report
+
+def controlled_random_distribution(equipos, dotaciones, variant=0):
+    """
+    Distribución aleatoria pero controlada para evitar déficits
+    """
+    rows = []
+    deficit_report = []
+    
+    pisos = ["Piso 1", "Piso 2", "Piso 3"]
+    np.random.seed(variant * 1000)  # Para reproducibilidad por variante
+    
+    for i, (equipo, dotacion) in enumerate(zip(equipos, dotaciones)):
+        # Distribuir con cierta aleatoriedad controlada
+        cupos_restantes = dotacion
+        dist_diaria = [0] * 5
+        
+        # Asignación base equitativa
+        for j in range(5):
+            dist_diaria[j] = dotacion // 5
+            cupos_restantes -= dist_diaria[j]
+        
+        # Distribuir el resto aleatoriamente
+        for _ in range(cupos_restantes):
+            idx = np.random.randint(0, 5)
+            dist_diaria[idx] += 1
+        
+        # Aplicar pequeña variación aleatoria (±10%)
+        for j in range(5):
+            variacion = np.random.randint(-max(1, dist_diaria[j]//10), max(1, dist_diaria[j]//10)+1)
+            dist_diaria[j] = max(1, dist_diaria[j] + variacion)
+        
+        for j, dia in enumerate(ORDER_DIAS):
+            piso = pisos[np.random.randint(0, len(pisos))]
+            
+            rows.append({
+                'piso': piso,
+                'equipo': equipo,
+                'dia': dia,
+                'cupos': dist_diaria[j],
+                'dotacion_total': dotacion
+            })
+    
+    # Cupos libres
+    total_cupos = sum(dotaciones)
+    cupos_libres_por_dia = max(1, total_cupos // 40)  # ~2.5% por día
+    
+    for piso in pisos:
+        for dia in ORDER_DIAS:
+            rows.append({
+                'piso': piso,
+                'equipo': "Cupos libres",
+                'dia': dia,
+                'cupos': cupos_libres_por_dia,
+                'dotacion_total': cupos_libres_por_dia * 5
+            })
+    
+    return rows, deficit_report
+
+def calculate_distribution_stats(rows, df_equipos):
+    """
+    Calcula estadísticas de la distribución para comparar opciones
+    """
+    df = pd.DataFrame(rows)
+    
+    # Obtener dotaciones reales
+    dotacion_map = {}
+    equipo_col = None
+    dotacion_col = None
+    
+    for col in df_equipos.columns:
+        if col.lower() in ['equipo', 'team', 'departamento']:
+            equipo_col = col
+        elif col.lower() in ['dotacion', 'dotación', 'total']:
+            dotacion_col = col
+    
+    if equipo_col and dotacion_col:
+        for _, row in df_equipos.iterrows():
+            dotacion_map[row[equipo_col]] = row[dotacion_col]
+    
+    stats = {
+        'total_cupos_asignados': df['cupos'].sum(),
+        'cupos_libres': df[df['equipo'] == 'Cupos libres']['cupos'].sum(),
+        'equipos_con_deficit': 0,
+        'distribucion_promedio': 0,
+        'uniformidad': 0
+    }
+    
+    # Calcular déficits
+    for equipo in df['equipo'].unique():
+        if equipo == 'Cupos libres':
+            continue
+            
+        cupos_totales = df[df['equipo'] == equipo]['cupos'].sum()
+        dotacion_esperada = dotacion_map.get(equipo, cupos_totales)
+        
+        if cupos_totales < dotacion_esperada:
+            stats['equipos_con_deficit'] += 1
+    
+    # Calcular uniformidad (desviación estándar de cupos por día)
+    cupos_por_dia = df.groupby('dia')['cupos'].sum()
+    stats['uniformidad'] = cupos_por_dia.std()
+    
+    return stats
+
+def show_distribution_insights(rows, deficit_data):
+    """Muestra insights detallados de la distribución"""
+    df = pd.DataFrame(rows)
+    
+    st.subheader("📊 Métricas de la Distribución")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_cupos = df['cupos'].sum()
+        st.metric("Total Cupos Asignados", total_cupos)
+    
+    with col2:
+        cupos_libres = df[df['equipo'] == 'Cupos libres']['cupos'].sum()
+        st.metric("Cupos Libres", cupos_libres)
+    
+    with col3:
+        equipos_unicos = df[df['equipo'] != 'Cupos libres']['equipo'].nunique()
+        st.metric("Equipos Asignados", equipos_unicos)
+    
+    with col4:
+        uniformidad = df.groupby('dia')['cupos'].sum().std()
+        st.metric("Uniformidad (σ)", f"{uniformidad:.1f}")
+    
+    # Gráfico de distribución por día
+    st.subheader("📈 Distribución por Día")
+    cupos_por_dia = df.groupby('dia')['cupos'].sum().reindex(ORDER_DIAS)
+    
+    fig, ax = plt.subplots(figsize=(10, 4))
+    cupos_por_dia.plot(kind='bar', ax=ax, color='skyblue')
+    ax.set_ylabel('Total Cupos')
+    ax.set_title('Distribución de Cupos por Día de la Semana')
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
 
 def clean_reservation_df(df, tipo="puesto"):
     if df.empty: return df
@@ -412,7 +686,6 @@ if menu == "Vista pública":
             lib = df_view[df_view["equipo"]=="Cupos libres"].groupby(["piso","dia"], as_index=True, observed=False).agg({"cupos":"sum"}).reset_index()
             lib = apply_sorting_to_df(lib)
             st.subheader("Distribución completa")
-            # CORRECCIÓN ERROR 1: Quitamos width=None, usamos use_container_width=True
             st.dataframe(df_view, hide_index=True, use_container_width=True)
             st.subheader("Cupos libres por piso y día")
             st.dataframe(lib, hide_index=True, use_container_width=True)
@@ -634,8 +907,25 @@ elif menu == "Administrador":
         st.subheader("Generador de Distribución Inteligente")
         c_up, c_strat = st.columns([2, 1])
         up = c_up.file_uploader("Subir archivo Excel (Hojas: 'Equipos', 'Parámetros')", type=["xlsx"])
-        estrategia = c_strat.radio("Estrategia Base:", ["🎲 Aleatorio (Recomendado)", "🧩 Tetris", "🐜 Relleno"])
-        strat_map = {"🧩 Tetris": "size_desc", "🎲 Aleatorio (Recomendado)": "random", "🐜 Relleno": "size_asc"}
+        
+        # NUEVO: Checkbox para ignorar parámetros
+        ignore_params = st.checkbox("🎯 Ignorar hoja de parámetros y generar distribución ideal", 
+                                   help="Genera distribuciones optimizadas sin restricciones de capacidad")
+        
+        if ignore_params:
+            estrategia = st.radio("Estrategia de Distribución Ideal:", 
+                                 ["⚖️ Equitativa Perfecta", "🔄 Balanceada con Flex", "🎲 Aleatoria Controlada"])
+        else:
+            estrategia = c_strat.radio("Estrategia Base:", ["🎲 Aleatorio (Recomendado)", "🧩 Tetris", "🐜 Relleno"])
+        
+        strat_map = {
+            "🧩 Tetris": "size_desc", 
+            "🎲 Aleatorio (Recomendado)": "random", 
+            "🐜 Relleno": "size_asc",
+            "⚖️ Equitativa Perfecta": "perfect_equity",
+            "🔄 Balanceada con Flex": "balanced_flex",
+            "🎲 Aleatoria Controlada": "controlled_random"
+        }
         sel_strat_code = strat_map.get(estrategia, "random")
 
         if 'excel_equipos' not in st.session_state: st.session_state['excel_equipos'] = None
@@ -643,30 +933,95 @@ elif menu == "Administrador":
         if 'proposal_rows' not in st.session_state: st.session_state['proposal_rows'] = None
         if 'proposal_deficit' not in st.session_state: st.session_state['proposal_deficit'] = None
         if 'last_optimization_stats' not in st.session_state: st.session_state['last_optimization_stats'] = None
+        # NUEVO: Para almacenar múltiples opciones
+        if 'multiple_proposals' not in st.session_state: st.session_state['multiple_proposals'] = []
 
         if up:
             try:
                 if st.button("📂 Procesar Inicial", type="primary"):
-                    df_eq = pd.read_excel(up, "Equipos"); df_pa = pd.read_excel(up, "Parámetros")
-                    st.session_state['excel_equipos'] = df_eq; st.session_state['excel_params'] = df_pa
-                    rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code)
-                    st.session_state['proposal_rows'] = rows; st.session_state['proposal_deficit'] = deficit
+                    df_eq = pd.read_excel(up, "Equipos")
+                    
+                    if ignore_params:
+                        # Generar múltiples propuestas ideales
+                        st.session_state['excel_equipos'] = df_eq
+                        st.session_state['excel_params'] = None
+                        
+                        # Generar 3 opciones diferentes
+                        proposals = []
+                        for i in range(3):
+                            rows, deficit = get_ideal_distribution_proposal(df_eq, strategy=sel_strat_code, variant=i)
+                            proposals.append({
+                                'rows': rows,
+                                'deficit': deficit,
+                                'name': f"Opción {i+1} - {estrategia}",
+                                'stats': calculate_distribution_stats(rows, df_eq)
+                            })
+                        
+                        st.session_state['multiple_proposals'] = proposals
+                        st.session_state['proposal_rows'] = proposals[0]['rows']
+                        st.session_state['proposal_deficit'] = proposals[0]['deficit']
+                        
+                    else:
+                        # Comportamiento original
+                        df_pa = pd.read_excel(up, "Parámetros")
+                        st.session_state['excel_equipos'] = df_eq
+                        st.session_state['excel_params'] = df_pa
+                        rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code)
+                        st.session_state['proposal_rows'] = rows
+                        st.session_state['proposal_deficit'] = deficit
+                        st.session_state['multiple_proposals'] = []  # Limpiar propuestas múltiples
+                        
                     st.rerun()
-            except Exception as e: st.error(f"Error al leer el Excel: {e}")
+                    
+            except Exception as e: 
+                st.error(f"Error al leer el Excel: {e}")
 
         if st.session_state['proposal_rows'] is not None:
             st.divider()
+            
+            # MOSTRAR OPCIONES MÚLTIPLES SI EXISTEN
+            if st.session_state['multiple_proposals'] and len(st.session_state['multiple_proposals']) > 1:
+                st.subheader("🎯 Opciones de Distribución Generadas")
+                
+                # Mostrar estadísticas comparativas
+                cols = st.columns(len(st.session_state['multiple_proposals']))
+                
+                for idx, proposal in enumerate(st.session_state['multiple_proposals']):
+                    with cols[idx]:
+                        stats = proposal['stats']
+                        st.metric(
+                            label=proposal['name'],
+                            value=f"{stats['total_cupos_asignados']} cupos",
+                            delta=f"{stats['cupos_libres']} libres"
+                        )
+                        st.caption(f"Uniformidad: {stats['uniformidad']:.1f}")
+                        st.caption(f"Déficits: {stats['equipos_con_deficit']}")
+                        
+                        if st.button(f"Seleccionar Opción {idx+1}", key=f"select_{idx}", use_container_width=True):
+                            st.session_state['proposal_rows'] = proposal['rows']
+                            st.session_state['proposal_deficit'] = proposal['deficit']
+                            st.rerun()
+                
+                st.markdown("---")
+            
+            # CONTINUAR CON LA VISUALIZACIÓN NORMAL
             n_def = len(st.session_state['proposal_deficit']) if st.session_state['proposal_deficit'] else 0
-            if n_def == 0: st.success("✅ **¡Distribución Perfecta!** 0 conflictos detectados.")
-            else: st.warning(f"⚠️ **Distribución Actual:** {n_def} cupos faltantes en total.")
+            if n_def == 0: 
+                st.success("✅ **¡Distribución Perfecta!** 0 conflictos detectados.")
+            else: 
+                st.warning(f"⚠️ **Distribución Actual:** {n_def} cupos faltantes en total.")
 
             t_view, t_def = st.tabs(["📊 Distribución Visual", "🚨 Reporte de Conflictos"])
             with t_view:
                 df_preview = pd.DataFrame(st.session_state['proposal_rows'])
                 if not df_preview.empty:
-                    # CORRECCIÓN ERROR 1: Quitamos width=None, usamos use_container_width=True
                     st.dataframe(apply_sorting_to_df(df_preview), hide_index=True, use_container_width=True)
                 else: st.warning("No se generaron asignaciones.")
+                
+                # AGREGAR: Mostrar insights si es distribución ideal
+                if st.session_state.get('multiple_proposals'):
+                    show_distribution_insights(st.session_state['proposal_rows'], st.session_state['proposal_deficit'])
+                    
             with t_def:
                 if st.session_state['proposal_deficit']:
                     def_df = pd.DataFrame(st.session_state['proposal_deficit'])
@@ -677,21 +1032,50 @@ elif menu == "Administrador":
             c_actions = st.columns([1, 1, 1])
             if c_actions[0].button("🔄 Probar otra suerte"):
                 with st.spinner("Generando..."):
-                    rows, deficit = get_distribution_proposal(st.session_state['excel_equipos'], st.session_state['excel_params'], strategy=sel_strat_code)
-                    st.session_state['proposal_rows'] = rows; st.session_state['proposal_deficit'] = deficit
+                    if st.session_state.get('multiple_proposals'):
+                        # En modo ideal, generar nuevas opciones
+                        proposals = []
+                        for i in range(3):
+                            rows, deficit = get_ideal_distribution_proposal(
+                                st.session_state['excel_equipos'], 
+                                strategy=sel_strat_code, 
+                                variant=i+3  # Cambiar variante para nuevas opciones
+                            )
+                            proposals.append({
+                                'rows': rows,
+                                'deficit': deficit,
+                                'name': f"Opción {i+1} - {estrategia}",
+                                'stats': calculate_distribution_stats(rows, st.session_state['excel_equipos'])
+                            })
+                        st.session_state['multiple_proposals'] = proposals
+                        st.session_state['proposal_rows'] = proposals[0]['rows']
+                        st.session_state['proposal_deficit'] = proposals[0]['deficit']
+                    else:
+                        # Comportamiento original
+                        rows, deficit = get_distribution_proposal(
+                            st.session_state['excel_equipos'], 
+                            st.session_state['excel_params'], 
+                            strategy=sel_strat_code
+                        )
+                        st.session_state['proposal_rows'] = rows
+                        st.session_state['proposal_deficit'] = deficit
                 st.rerun()
             
             if c_actions[1].button("✨ Auto-Optimizar"):
-                NUM_INTENTOS = 20; my_bar = st.progress(0, text="Optimizando...")
-                best_rows = None; best_deficit = None; min_unfairness_score = 999999
-                for i in range(NUM_INTENTOS):
-                    r, d = get_distribution_proposal(st.session_state['excel_equipos'], st.session_state['excel_params'], strategy="random")
-                    unfairness_score = sum([1 for x in d]) if d else 0
-                    if unfairness_score < min_unfairness_score:
-                        min_unfairness_score = unfairness_score; best_rows = r; best_deficit = d
-                    my_bar.progress(int((i + 1) / NUM_INTENTOS * 100))
-                st.session_state['proposal_rows'] = best_rows; st.session_state['proposal_deficit'] = best_deficit
-                my_bar.empty(); st.rerun()
+                if st.session_state.get('multiple_proposals'):
+                    # En modo ideal, no aplica la optimización por déficit
+                    st.info("En modo ideal, la distribución ya está optimizada.")
+                else:
+                    NUM_INTENTOS = 20; my_bar = st.progress(0, text="Optimizando...")
+                    best_rows = None; best_deficit = None; min_unfairness_score = 999999
+                    for i in range(NUM_INTENTOS):
+                        r, d = get_distribution_proposal(st.session_state['excel_equipos'], st.session_state['excel_params'], strategy="random")
+                        unfairness_score = sum([1 for x in d]) if d else 0
+                        if unfairness_score < min_unfairness_score:
+                            min_unfairness_score = unfairness_score; best_rows = r; best_deficit = d
+                        my_bar.progress(int((i + 1) / NUM_INTENTOS * 100))
+                    st.session_state['proposal_rows'] = best_rows; st.session_state['proposal_deficit'] = best_deficit
+                    my_bar.empty(); st.rerun()
 
             if c_actions[2].button("💾 Guardar Definitivo", type="primary"):
                 clear_distribution(conn); insert_distribution(conn, st.session_state['proposal_rows'])
@@ -715,10 +1099,7 @@ elif menu == "Administrador":
         if not pim.exists(): pim = PLANOS_DIR / f"Piso{p_num}.png"
 
         if pim.exists():
-            # =========================================================
             # CORRECCIÓN DEFINITIVA ERROR 'str object has no attribute height'
-            # =========================================================
-            # Cargamos la imagen como OBJETO PIL. No usamos string base64.
             img = PILImage.open(pim)
             
             cw = 800; w, h = img.size
@@ -736,7 +1117,7 @@ elif menu == "Administrador":
                 stroke_color="#00A04A",
                 background_image=img,  # <--- SE PASA EL OBJETO IMAGEN
                 update_streamlit=True,
-                width=cw, height=ch,
+                width=int(cw), height=int(ch),
                 drawing_mode="rect",
                 key=f"cv_{p_sel}"
             )
