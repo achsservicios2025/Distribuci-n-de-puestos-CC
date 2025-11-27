@@ -9,4 +9,5 @@ google-auth
 requests
 openpyxl>=3.1.0
 xlsxwriter
-plotly
+streamlit-drawable-canvas>=0.9.3
+streamlit-image-annotation==0.7.2
