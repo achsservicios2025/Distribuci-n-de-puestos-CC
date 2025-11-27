@@ -653,31 +653,43 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
         if fpng.exists():
             st.image(str(fpng), caption="Vista Previa", width=700) # Ancho controlado
 
-def enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path):
-    p_num = p_sel.replace("Piso ", "").strip()
-    file_base = f"piso{p_num}"
-    pim = PLANOS_DIR / f"{file_base}.png"
-    if not pim.exists(): pim = PLANOS_DIR / f"{file_base}.jpg"
-    if not pim.exists(): pim = PLANOS_DIR / f"Piso{p_num}.png"
-
-    if not pim.exists():
-        st.error(f"❌ No se encontró el plano para {p_sel}")
-        return
-
-    img = PILImage.open(pim)
-    w, h = img.size
+def modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path):
+    """Diseñador moderno de zonas con interfaz atractiva"""
     
-    # Mostramos imagen de referencia con tamaño controlado
-    st.image(img, caption=f"Plano Base {p_sel}", width=700) 
+    st.title("🎨 Diseñador de Espacios de Trabajo")
     
-    try:
-        from streamlit_image_annotation import image_annotation
-        # ... (Tu código de anotación avanzada iría aquí si funcionara la librería)
-        # Por seguridad y estabilidad, llamamos al manual mejorado directamente
-        fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, w, h)
-    except ImportError:
-        fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, w, h)
-
+    # Header con información
+    with st.container():
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info(f"**Piso:** {p_sel}")
+        with col2:
+            st.info(f"**Día:** {d_sel}")
+        with col3:
+            if p_sel in zonas:
+                st.info(f"**Zonas:** {len(zonas[p_sel])}")
+    
+    # Pestañas para diferentes vistas
+    tab1, tab2, tab3 = st.tabs(["🏢 Vista 2D", "📐 Editor", "📊 Analytics"])
+    
+    with tab1:
+        # Vista 2D con la imagen generada
+        st.subheader("Vista 2D del Plano")
+        p_num = p_sel.replace("Piso ", "").strip()
+        ds = d_sel.lower().replace("é", "e").replace("á", "a")
+        fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+        if fpng.exists():
+            st.image(str(fpng), use_container_width=True)
+        else:
+            st.info("No se ha generado una vista previa para este piso y día. Genera una en la pestaña 'Editor'.")
+        
+    with tab2:
+        # Editor moderno
+        modern_zone_editor(p_sel, d_sel, zonas, df_d)
+        
+    with tab3:
+        # Analytics visuales
+        show_zone_analytics(p_sel, zonas, df_d)
 # ---------------------------------------------------------
 # INICIO APP
 # ---------------------------------------------------------
@@ -1176,7 +1188,7 @@ elif menu == "Administrador":
         d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
         
         # Llamar al editor simplificado
-        enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path)
+       modern_zone_designer(p_sel, d_sel, zonas, df_d, global_logo_path)
 
     with t3:
         st.subheader("Generar Reportes")
@@ -1234,3 +1246,4 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
