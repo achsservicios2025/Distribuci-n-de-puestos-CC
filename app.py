@@ -310,13 +310,12 @@ def enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path):
         fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height)
 
 # Función de respaldo elegante
-# Función de respaldo elegante
+# Función de respaldo elegante (CORREGIDA CON KEYS ÚNICAS)
 def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height):
     """Editor manual mejorado con vista previa interactiva"""
     
-    # --- CORRECCIÓN: Calcular p_num aquí dentro ---
+    # Calcular p_num (Necesario para el nombre del archivo al final)
     p_num = p_sel.replace("Piso ", "").strip()
-    # ----------------------------------------------
 
     st.subheader("🎯 Modo de Dibujo Manual")
     
@@ -348,7 +347,8 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
     # Controles de dibujo mejorados
     st.subheader("🖊️ Agregar Nueva Zona")
     
-    with st.form("zona_form_advanced"):
+    # CORRECCIÓN: Key única para el formulario basada en el piso
+    with st.form(f"zona_form_advanced_{p_sel}"):
         col1, col2 = st.columns(2)
         
         with col1:
@@ -366,8 +366,9 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
             elif "3" in p_sel: salas_piso = ["Sala Reuniones Piso 3"]
             eqs = eqs + salas_piso
             
-            equipo = st.selectbox("Equipo / Sala", eqs, key="team_select_adv")
-            color = st.color_picker("Color de la Zona", "#00A04A", key="color_picker_adv")
+            # CORRECCIÓN: Keys únicas para inputs
+            equipo = st.selectbox("Equipo / Sala", eqs, key=f"team_select_adv_{p_sel}")
+            color = st.color_picker("Color de la Zona", "#00A04A", key=f"color_picker_adv_{p_sel}")
             
             if equipo and equipo in current_seats_dict:
                 st.info(f"📊 Cupos actuales: {current_seats_dict[equipo]}")
@@ -377,18 +378,18 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
             col_x, col_y = st.columns(2)
             with col_x:
                 x = st.slider("Posición X", 0, img_width, min(100, img_width-100), 10, 
-                             help="Posición horizontal desde la izquierda")
+                             help="Posición horizontal desde la izquierda", key=f"x_adv_{p_sel}")
             with col_y:
                 y = st.slider("Posición Y", 0, img_height, min(100, img_height-100), 10,
-                             help="Posición vertical desde arriba")
+                             help="Posición vertical desde arriba", key=f"y_adv_{p_sel}")
             
             col_w, col_h = st.columns(2)
             with col_w:
                 w = st.slider("Ancho", 10, min(500, img_width-x), 100, 10,
-                             help="Ancho de la zona")
+                             help="Ancho de la zona", key=f"w_adv_{p_sel}")
             with col_h:
                 h = st.slider("Alto", 10, min(300, img_height-y), 80, 10,
-                             help="Alto de la zona")
+                             help="Alto de la zona", key=f"h_adv_{p_sel}")
         
         # Vista previa en tiempo real
         st.subheader("👁️ Vista Previa en Tiempo Real")
@@ -416,6 +417,104 @@ def fallback_manual_editor(p_sel, d_sel, zonas, df_d, img, img_width, img_height
         
         submitted = st.form_submit_button("💾 Guardar Zona", use_container_width=True)
         
+        if submitted and equipo:
+            zonas.setdefault(p_sel, []).append({
+                "team": equipo,
+                "x": x,
+                "y": y,
+                "w": w, 
+                "h": h,
+                "color": color
+            })
+            save_zones(zonas)
+            st.success("✅ Zona guardada exitosamente!")
+            st.rerun()
+
+    # Gestión de zonas existentes
+    st.subheader("📋 Zonas Existentes")
+    if p_sel in zonas and zonas[p_sel]:
+        for i, zona in enumerate(zonas[p_sel]):
+            with st.container(border=True):
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                
+                with col1:
+                    st.markdown(f"**{zona['team']}**")
+                    st.markdown(f"📍 `({zona['x']}, {zona['y']})` | 📏 `{zona['w']}×{zona['h']}`")
+                    st.markdown(f"🎨 <span style='color:{zona['color']}'>■ Color</span>", 
+                               unsafe_allow_html=True)
+                
+                with col2:
+                    # Mini vista previa de la zona
+                    mini_fig, mini_ax = plt.subplots(figsize=(3, 2))
+                    mini_ax.imshow(img)
+                    rect = plt.Rectangle(
+                        (zona['x'], zona['y']), zona['w'], zona['h'],
+                        linewidth=2, edgecolor=zona['color'], facecolor=zona['color'] + '40'
+                    )
+                    mini_ax.add_patch(rect)
+                    mini_ax.set_xlim(0, img_width)
+                    mini_ax.set_ylim(img_height, 0)  # Invertir Y para coordenadas de imagen
+                    mini_ax.axis('off')
+                    st.pyplot(mini_fig, use_container_width=True)
+                
+                with col3:
+                    # Keys únicas para botones de edición
+                    if st.button("✏️ Editar", key=f"edit_{p_sel}_{i}"):
+                        st.session_state.team_select_adv = zona['team']
+                        st.session_state.color_picker_adv = zona['color']
+                        st.session_state.x_pos = zona['x']
+                        st.session_state.y_pos = zona['y']
+                        st.session_state.width = zona['w']
+                        st.session_state.height = zona['h']
+                
+                with col4:
+                    # Keys únicas para botones de borrar
+                    if st.button("🗑️ Eliminar", key=f"del_{p_sel}_{i}"):
+                        zonas[p_sel].pop(i)
+                        save_zones(zonas)
+                        st.rerun()
+    else:
+        st.info("No hay zonas definidas para este piso")
+
+    # Generar vista previa final
+    st.subheader("🎨 Vista Previa Final")
+    with st.expander("Configurar Estilos de Visualización", expanded=True):
+        col_style1, col_style2 = st.columns(2)
+        with col_style1:
+            # CORRECCIÓN: Aquí es donde fallaba, agregamos key única
+            titulo = st.text_input("Título del Plano", f"Distribución {p_sel}", key=f"tit_man_{p_sel}")
+            subtitulo = st.text_input("Subtítulo", f"Día: {d_sel}", key=f"sub_man_{p_sel}")
+        with col_style2:
+            bg_color = st.color_picker("Color de Fondo", "#FFFFFF", key=f"bg_man_{p_sel}")
+            text_color = st.color_picker("Color de Texto", "#000000", key=f"txt_man_{p_sel}")
+        
+        incluir_logo = st.checkbox("Incluir Logo", True, key=f"logo_man_{p_sel}")
+    
+    if st.button("🔄 Generar Vista Previa Completa", use_container_width=True, key=f"btn_gen_{p_sel}"):
+        conf = {
+            "title_text": titulo, 
+            "subtitle_text": subtitulo, 
+            "bg_color": bg_color, 
+            "title_color": text_color, 
+            "use_logo": incluir_logo
+        }
+        st.session_state['last_style_config'] = conf
+        
+        # Generar vista previa
+        current_seats_dict = {}
+        if not df_d.empty:
+            subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+            current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
+        
+        out = generate_colored_plan(p_sel, d_sel, current_seats_dict, "PNG", conf, global_logo_path)
+        if out: 
+            st.success("✅ Vista previa generada!")
+    
+    # Mostrar vista previa si existe
+    ds = d_sel.lower().replace("é", "e").replace("á", "a")
+    fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+    if fpng.exists(): 
+        st.image(str(fpng), caption="Vista Previa Generada", use_column_width=True)        
         if submitted and equipo:
             zonas.setdefault(p_sel, []).append({
                 "team": equipo,
@@ -1913,6 +2012,7 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
 
 
 
