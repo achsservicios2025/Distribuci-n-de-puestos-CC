@@ -1196,3 +1196,4 @@ elif menu == "Administrador":
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         # El doble botón "BORRAR" al final de tu código original ha sido consolidado en uno solo.
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+
