@@ -11,3 +11,15 @@ matplotlib>=3.7.0
 requests>=2.31.0
 streamlit-image-annotation>=0.1.2
 plotly>=5.17.0
+
+streamlit>=1.51.0
+pandas
+numpy
+Pillow
+fpdf
+matplotlib
+gspread
+google-auth
+# --- LIBRERÍAS DE DIBUJO ---
+streamlit-drawable-canvas>=0.9.3
+streamlit-image-annotation>=1.0.0
