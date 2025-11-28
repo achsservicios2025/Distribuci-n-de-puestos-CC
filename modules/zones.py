@@ -68,29 +68,15 @@ def get_custom_font(font_name: str, size: int):
 
 # --- HEADER CON TÍTULO Y SUBTÍTULO (POSICIÓN CENTRAL) ---
 def create_header_image(width, config, logo_path=None):
-    bg_color = config.get("bg_color", "#FFFFFF")
-    use_logo = config.get("use_logo", False)
-    logo_w_req = config.get("logo_width", 150)
-    logo_align = config.get("logo_align", "Izquierda")
+    logo_align = config.get("logo_align", "Izquierda") # Recibir parámetro
+    # ... Lógica para calcular X basado en align ...
+    if logo_align == "Centro": x_pos = (width - logo_w) // 2
+    elif logo_align == "Derecha": x_pos = width - logo_w - 30
+    else: x_pos = 30
     
-    # Título
-    t_text = config.get("title_text", "")
-    t_font = config.get("title_font", "Arial")
-    t_size = config.get("title_size", 36)
-    t_color = config.get("title_color", "#000000")
-    t_align = config.get("alignment", "Centro") 
-    
-    # Subtítulo
-    s_text = config.get("subtitle_text", "")
-    s_font = config.get("subtitle_font", "Arial") 
-    s_size = config.get("subtitle_size", 24)       
-    s_color = config.get("subtitle_color", "#666666")
-    s_align = config.get("subtitle_align", "Centro") 
-    
-    # Calcular alturas
-    font_t = get_custom_font(t_font, t_size)
-    font_s = get_custom_font(s_font, s_size)
-    
+    if logo_align == "Oculto":
+        # No dibujar logo
+        pass    
     # Cálculo de la altura del texto (más seguro con getbbox)
     try: h_t = font_t.getbbox(t_text)[3] - font_t.getbbox(t_text)[1] if t_text else 0
     except: h_t = t_size 
@@ -174,10 +160,9 @@ def create_header_image(width, config, logo_path=None):
     return img
 
 # --- LEYENDA (Añadido estilo configurable y alineación) ---
-def create_legend_image(zones_list, width, seat_counts, config, bg_color="#FFFFFF"):
-    unique_teams = {}
-    for z in zones_list: unique_teams[z['team']] = z['color']
-    if not unique_teams: return None
+def create_legend_image(zones_list, width, seat_counts, config):
+    legend_align = config.get("legend_align", "Izquierda")
+    if legend_align == "Oculta": return None
 
     # Configuración de Leyenda (Título y Elementos)
     leg_font = config.get("legend_font", "Arial")
@@ -317,3 +302,4 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
     except Exception as e:
         print(f"Error: {e}")
         return None
+
