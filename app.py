@@ -15,6 +15,8 @@ from io import BytesIO
 from dataclasses import dataclass
 import base64
 import numpy as np
+from modules.seats import compute_ideal_distribution
+from modules.pdfgen import generate_full_pdf
 
 # ---------------------------------------------------------
 # 1. PARCHE DE COMPATIBILIDAD (Reforzado para Streamlit 1.51+)
@@ -984,247 +986,140 @@ elif menu == "Administrador":
 
     if st.button("Cerrar Sesión"): st.session_state["is_admin"]=False; st.rerun()
 
-    t1, t2, t3, t4, t5, t6 = st.tabs(["Excel", "Editor Visual", "Informes", "Config", "Apariencia", "Mantenimiento"])
+   t1, t2, t3, t4, t5, t6 = st.tabs(["Excel", "Editor Visual", "Informes", "Config", "Apariencia", "Mantenimiento"])
     
     with t1:
-        st.subheader("Generador de Distribución Inteligente")
-        c_up, c_strat = st.columns([2, 1])
-        up = c_up.file_uploader("Subir archivo Excel (Hojas: 'Equipos', 'Parámetros')", type=["xlsx"])
+        st.subheader("Generador de Distribución")
+        up = st.file_uploader("Subir Excel", type=["xlsx"])
         
-        # NUEVO: Checkbox para ignorar parámetros
-        ignore_params = st.checkbox("🎯 Ignorar hoja de parámetros y generar distribución ideal", 
-                                       help="Genera distribuciones optimizadas sin restricciones de capacidad")
+        # BOTÓN IGNORAR PARÁMETROS
+        ignore_params = st.checkbox("🎯 Ignorar hoja de parámetros (Distribución Ideal)", value=True)
         
-        if ignore_params:
-            estrategia = st.radio("Estrategia de Distribución Ideal:", 
-                                 ["⚖️ Equitativa Perfecta", "🔄 Balanceada con Flex", "🎲 Aleatoria Controlada"])
-        else:
-            estrategia = c_strat.radio("Estrategia Base:", ["🎲 Aleatorio (Recomendado)", "🧩 Tetris", "🐜 Relleno"])
-        
-        strat_map = {
-            "🧩 Tetris": "size_desc", 
-            "🎲 Aleatorio (Recomendado)": "random", 
-            "🐜 Relleno": "size_asc",
-            "⚖️ Equitativa Perfecta": "perfect_equity",
-            "🔄 Balanceada con Flex": "balanced_flex",
-            "🎲 Aleatoria Controlada": "controlled_random"
-        }
-        sel_strat_code = strat_map.get(estrategia, "random")
-
-        if 'excel_equipos' not in st.session_state: st.session_state['excel_equipos'] = None
-        if 'excel_params' not in st.session_state: st.session_state['excel_params'] = None
-        if 'proposal_rows' not in st.session_state: st.session_state['proposal_rows'] = None
-        if 'proposal_deficit' not in st.session_state: st.session_state['proposal_deficit'] = None
-        if 'last_optimization_stats' not in st.session_state: st.session_state['last_optimization_stats'] = None
-        # NUEVO: Para almacenar múltiples opciones
-        if 'multiple_proposals' not in st.session_state: st.session_state['multiple_proposals'] = []
-
         if up:
-            try:
-                if st.button("📂 Procesar Inicial", type="primary"):
-                    df_eq = pd.read_excel(up, "Equipos")
+            if st.button("Procesar"):
+                df_eq = pd.read_excel(up, "Equipos")
+                
+                if ignore_params:
+                    # GENERAR 3 OPCIONES DIFERENTES
+                    proposals = []
+                    # Capacidad ficticia o leída de config (ajustar según tu lógica de zonas)
+                    cap_pisos = {"Piso 1": 48, "Piso 2": 52, "Piso 3": 40} 
                     
-                    if ignore_params:
-                        # Generar múltiples propuestas ideales
-                        st.session_state['excel_equipos'] = df_eq
-                        st.session_state['excel_params'] = None
-                        
-                        # Generar 3 opciones diferentes
-                        proposals = []
-                        for i in range(3):
-                            rows, deficit = get_ideal_distribution_proposal(df_eq, strategy=sel_strat_code, variant=i)
-                            proposals.append({
-                                'rows': rows,
-                                'deficit': deficit,
-                                'name': f"Opción {i+1} - {estrategia}",
-                                'stats': calculate_distribution_stats(rows, df_eq)
-                            })
-                        
-                        st.session_state['multiple_proposals'] = proposals
-                        st.session_state['proposal_rows'] = proposals[0]['rows']
-                        st.session_state['proposal_deficit'] = proposals[0]['deficit']
-                        
-                    else:
-                        # Comportamiento original
-                        df_pa = pd.read_excel(up, "Parámetros")
-                        st.session_state['excel_equipos'] = df_eq
-                        st.session_state['excel_params'] = df_pa
-                        rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code)
-                        st.session_state['proposal_rows'] = rows
-                        st.session_state['proposal_deficit'] = deficit
-                        st.session_state['multiple_proposals'] = []  # Limpiar propuestas múltiples
-                        
-                    st.rerun()
+                    for i in range(1, 4):
+                        rows, deficit = compute_ideal_distribution(df_eq, variant=i*100, pisos_capacity=cap_pisos)
+                        # Calcular estadisticas basicas
+                        libres = sum([r['cupos'] for r in rows if r['equipo']=='Cupos libres'])
+                        proposals.append({
+                            'name': f"Opción {i} (Libres: {libres})",
+                            'rows': rows,
+                            'deficit': deficit
+                        })
                     
-            except Exception as e: 
-                st.error(f"Error al leer el Excel: {e}")
-
-        if st.session_state['proposal_rows'] is not None:
-            st.divider()
-            
-            # MOSTRAR OPCIONES MÚLTIPLES SI EXISTEN
-            if st.session_state['multiple_proposals'] and len(st.session_state['multiple_proposals']) > 1:
-                st.subheader("🎯 Opciones de Distribución Generadas")
-                
-                # Mostrar estadísticas comparativas
-                cols = st.columns(len(st.session_state['multiple_proposals']))
-                
-                for idx, proposal in enumerate(st.session_state['multiple_proposals']):
-                    with cols[idx]:
-                        stats = proposal['stats']
-                        st.metric(
-                            label=proposal['name'],
-                            value=f"{stats['total_cupos_asignados']} cupos",
-                            delta=f"{stats['cupos_libres']} libres"
-                        )
-                        st.caption(f"Uniformidad: {stats['uniformidad']:.1f}")
-                        st.caption(f"Déficits: {stats['equipos_con_deficit']}")
-                        
-                        if st.button(f"Seleccionar Opción {idx+1}", key=f"select_{idx}", use_container_width=True):
-                            st.session_state['proposal_rows'] = proposal['rows']
-                            st.session_state['proposal_deficit'] = proposal['deficit']
-                            st.rerun()
-                
-                st.markdown("---")
-            
-            # CONTINUAR CON LA VISUALIZACIÓN NORMAL
-            n_def = len(st.session_state['proposal_deficit']) if st.session_state['proposal_deficit'] else 0
-            if n_def == 0: 
-                st.success("✅ **¡Distribución Perfecta!** 0 conflictos detectados.")
-            else: 
-                st.warning(f"⚠️ **Distribución Actual:** {n_def} cupos faltantes en total.")
-
-            t_view, t_def = st.tabs(["📊 Distribución Visual", "🚨 Reporte de Conflictos"])
-            with t_view:
-                df_preview = pd.DataFrame(st.session_state['proposal_rows'])
-                if not df_preview.empty:
-                    st.dataframe(apply_sorting_to_df(df_preview), hide_index=True, use_container_width=True)
-                else: st.warning("No se generaron asignaciones.")
-                
-                # AGREGAR: Mostrar insights si es distribución ideal
-                if st.session_state.get('multiple_proposals'):
-                    show_distribution_insights(st.session_state['proposal_rows'], st.session_state['proposal_deficit'])
-                    
-            with t_def:
-                if st.session_state['proposal_deficit']:
-                    def_df = pd.DataFrame(st.session_state['proposal_deficit'])
-                    st.dataframe(def_df, use_container_width=True)
-                else: st.info("Sin conflictos.")
-
-            st.markdown("---")
-            c_actions = st.columns([1, 1, 1])
-            if c_actions[0].button("🔄 Probar otra suerte"):
-                with st.spinner("Generando..."):
-                    if st.session_state.get('multiple_proposals'):
-                        # En modo ideal, generar nuevas opciones
-                        proposals = []
-                        for i in range(3):
-                            rows, deficit = get_ideal_distribution_proposal(
-                                st.session_state['excel_equipos'], 
-                                strategy=sel_strat_code, 
-                                variant=i+3  # Cambiar variante para nuevas opciones
-                            )
-                            proposals.append({
-                                'rows': rows,
-                                'deficit': deficit,
-                                'name': f"Opción {i+1} - {estrategia}",
-                                'stats': calculate_distribution_stats(rows, st.session_state['excel_equipos'])
-                            })
-                        st.session_state['multiple_proposals'] = proposals
-                        st.session_state['proposal_rows'] = proposals[0]['rows']
-                        st.session_state['proposal_deficit'] = proposals[0]['deficit']
-                    else:
-                        # Comportamiento original
-                        rows, deficit = get_distribution_proposal(
-                            st.session_state['excel_equipos'], 
-                            st.session_state['excel_params'], 
-                            strategy=sel_strat_code
-                        )
-                        st.session_state['proposal_rows'] = rows
-                        st.session_state['proposal_deficit'] = deficit
-                st.rerun()
-            
-            if c_actions[1].button("✨ Auto-Optimizar"):
-                if st.session_state.get('multiple_proposals'):
-                    # En modo ideal, no aplica la optimización por déficit
-                    st.info("En modo ideal, la distribución ya está optimizada.")
+                    st.session_state['multiple_proposals'] = proposals
+                    st.session_state['proposal_rows'] = proposals[0]['rows'] # Default 1
                 else:
-                    NUM_INTENTOS = 20; my_bar = st.progress(0, text="Optimizando...")
-                    best_rows = None; best_deficit = None; min_unfairness_score = 999999
-                    for i in range(NUM_INTENTOS):
-                        r, d = get_distribution_proposal(st.session_state['excel_equipos'], st.session_state['excel_params'], strategy="random")
-                        unfairness_score = sum([1 for x in d]) if d else 0
-                        if unfairness_score < min_unfairness_score:
-                            min_unfairness_score = unfairness_score; best_rows = r; best_deficit = d
-                        my_bar.progress(int((i + 1) / NUM_INTENTOS * 100))
-                    st.session_state['proposal_rows'] = best_rows; st.session_state['proposal_deficit'] = best_deficit
-                    my_bar.empty(); st.rerun()
+                    # Lógica antigua con parámetros
+                    pass
+        
+        # UI SELECCIÓN DE PROPUESTAS
+        if 'multiple_proposals' in st.session_state:
+            cols = st.columns(3)
+            for idx, prop in enumerate(st.session_state['multiple_proposals']):
+                if cols[idx].button(prop['name'], key=f"sel_prop_{idx}"):
+                    st.session_state['proposal_rows'] = prop['rows']
+                    st.success(f"Seleccionada: {prop['name']}")
 
-            if c_actions[2].button("💾 Guardar Definitivo", type="primary"):
-                clear_distribution(conn); insert_distribution(conn, st.session_state['proposal_rows'])
-                if st.session_state['proposal_deficit']: st.session_state['deficit_report'] = st.session_state['proposal_deficit']
-                elif 'deficit_report' in st.session_state: del st.session_state['deficit_report']
-                st.success("Guardado."); st.balloons(); st.rerun()
+        # TABLA PREVISUALIZACIÓN Y GUARDADO
+        if 'proposal_rows' in st.session_state:
+            st.dataframe(pd.DataFrame(st.session_state['proposal_rows']))
+            if st.button("💾 Guardar Distribución Definitiva", type="primary"):
+                 clear_distribution(conn)
+                 insert_distribution(conn, st.session_state['proposal_rows'])
+                 st.success("Guardado.")
 
-    with t2:
-        # REEMPLAZADO: Usamos el editor simplificado en lugar del canvas problemático
-        zonas = load_zones()
-        c1, c2 = st.columns(2)
+    with t2: # EDITOR VISUAL
+        # ... (Selectores de Piso/Día) ...
+        
+        # OPCIONES DE VISUALIZACIÓN
+        ce1, ce2 = st.columns(2)
+        pos_leyenda = ce1.selectbox("Posición Leyenda", ["Izquierda", "Centro", "Derecha", "Oculta"])
+        pos_logo = ce2.selectbox("Posición Logo", ["Izquierda", "Centro", "Derecha", "Oculto"])
+        
+        # LÓGICA DE FEEDBACK INMEDIATO DE CUPOS
+        st.subheader("Agregar Zona")
         df_d = read_distribution_df(conn)
-        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
-        p_sel = c1.selectbox("Piso", pisos_list)
-        d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
+        subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+        equipos_disp = subset['equipo'].unique().tolist()
         
-        # Llamar al editor simplificado
-        enhanced_zone_editor(p_sel, d_sel, zonas, df_d, global_logo_path)
+        eq_sel = st.selectbox("Equipo", [""] + equipos_disp)
+        
+        # Feedback Inmediato
+        cupos_info = 0
+        if eq_sel:
+            row = subset[subset['equipo'] == eq_sel]
+            if not row.empty:
+                cupos_info = row.iloc[0]['cupos']
+                st.info(f"ℹ️ El equipo **{eq_sel}** tiene asignados **{cupos_info}** cupos para este día.")
+        
+        # ... (Resto del form de coordenadas y botón guardar) ...
+        # Al guardar, pasas 'pos_leyenda' y 'pos_logo' en el diccionario de config a zones.py
 
-    with t3:
-        st.subheader("Generar Reportes")
-        rf = st.selectbox("Formato", ["Excel", "PDF"])
-        if st.button("Generar"):
-            df_raw = read_distribution_df(conn)
-            if "Excel" in rf:
-                b = BytesIO(); 
-                with pd.ExcelWriter(b) as w: df_raw.to_excel(w, index=False)
-                st.download_button("Descargar", b.getvalue(), "d.xlsx")
-            else:
-                d_data = st.session_state.get('deficit_report', [])
-                pdf_bytes = generate_full_pdf(df_raw, df_raw, logo_path=Path(global_logo_path), deficit_data=d_data)
-                st.download_button("Descargar PDF", pdf_bytes, "reporte.pdf", "application/pdf")
-    
-    with t4:
-        nu = st.text_input("User"); np = st.text_input("Pass", type="password"); ne = st.text_input("Email")
-        if st.button("Guardar Credenciales"): 
-            save_setting(conn, "admin_user", nu); save_setting(conn, "admin_pass", np); save_setting(conn, "admin_email", ne)
-            st.success("OK")
+    with t3: # INFORMES
+        st.subheader("Descargas")
+        
+        # Excel XLSX (No CSV)
+        if st.button("📥 Descargar Datos Crudos (XLSX)"):
+            b = BytesIO()
+            with pd.ExcelWriter(b, engine='xlsxwriter') as w:
+                read_distribution_df(conn).to_excel(w, sheet_name="Distribucion", index=False)
+                list_reservations_df(conn).to_excel(w, sheet_name="Reservas", index=False)
+            st.download_button("Descargar Excel", b.getvalue(), "data_sistema.xlsx")
+            
+        # PDF INFORMES
+        st.markdown("---")
+        st.write("Reportes PDF:")
+        if st.button("📄 Informe Completo (Admin)"):
+            pdf_bytes = generate_full_pdf(
+                read_distribution_df(conn),
+                listado_reservas_df(conn),
+                get_room_reservations_df(conn),
+                logo_path="static/logo.png",
+                is_admin=True # Activa secciones privadas
+            )
+            st.download_button("Descargar PDF Admin", pdf_bytes, "reporte_admin.pdf", "application/pdf")
 
-    with t5: 
-        admin_appearance_ui(conn)
+    with t6: # MANTENIMIENTO
+        st.subheader("Gestión de Reservas (Borrado Selectivo)")
         
-    with t6:
-        st.subheader("Opciones de Mantenimiento")
+        tab_puestos, tab_salas = st.tabs(["Puestos Flex", "Salas"])
         
-        # ACTUALIZADO: Más opciones de borrado
-        opcion_borrado = st.selectbox(
-            "Selecciona qué deseas borrar:",
-            ["Reservas", "Distribución", "Planos/Zonas", "TODO"]
-        )
-        
-        if st.button("Ejecutar Borrado", type="primary"):
-            if opcion_borrado == "TODO":
-                perform_granular_delete(conn, "TODO")
-                st.success("✅ Todo borrado exitosamente")
-            elif opcion_borrado == "Reservas":
-                perform_granular_delete(conn, "RESERVAS")
-                st.success("✅ Reservas borradas exitosamente")
-            elif opcion_borrado == "Distribución":
-                perform_granular_delete(conn, "DISTRIBUCION")
-                st.success("✅ Distribución borrada exitosamente")
-            elif opcion_borrado == "Planos/Zonas":
-                perform_granular_delete(conn, "ZONAS")
-                st.success("✅ Planos y zonas borrados exitosamente")
-            st.rerun()
-        
+        with tab_puestos:
+            df_res = list_reservations_df(conn) # Asegúrate de que esta función traiga todo
+            if not df_res.empty:
+                # Normalizar para evitar errores
+                df_res['Eliminar'] = False
+                # Editor de datos interactivo
+                edited_df = st.data_editor(
+                    df_res, 
+                    column_config={"Eliminar": st.column_config.CheckboxColumn(required=True)},
+                    disabled=[c for c in df_res.columns if c != "Eliminar"],
+                    key="editor_puestos"
+                )
+                
+                if st.button("🗑️ Eliminar Seleccionados (Puestos)", type="primary"):
+                    to_delete = edited_df[edited_df['Eliminar'] == True]
+                    if not to_delete.empty:
+                        # Iterar y borrar (o implementar borrado por lote en database.py)
+                        count = 0
+                        for _, row in to_delete.iterrows():
+                            # Asumiendo que tienes una funcion de borrado exacto
+                            # Si no, usa user+fecha+area
+                            if delete_reservation_from_db(conn, row['user_name'], row['reservation_date'], row['team_area']):
+                                count += 1
+                        st.success(f"Eliminadas {count} reservas.")
+                        st.rerun()
+                    else:
+                        st.warning("No seleccionaste nada.")     
         st.markdown("---")
         st.subheader("Resumen de Uso Semanal")
         df_distrib = read_distribution_df(conn)
@@ -1234,3 +1129,4 @@ elif menu == "Administrador":
                 st.dataframe(weekly_summary, hide_index=True, use_container_width=True)
             else:
                 st.info("No hay datos suficientes para el resumen semanal")
+
