@@ -225,6 +225,22 @@ def get_available_slots(conn, piso, fecha):
         st.error(f"Error calculando disponibilidad: {e}")
         return 0, 0
 
+def force_refresh_data():
+    """Forza la actualización de todos los datos en cache"""
+    try:
+        # Limpiar cache de datos
+        st.cache_data.clear()
+        
+        # Limpiar cache específico de reservas
+        from modules.database import list_reservations_df, get_room_reservations_df
+        list_reservations_df.clear()
+        get_room_reservations_df.clear()
+        
+        return True
+    except Exception as e:
+        print(f"Error refrescando datos: {e}")
+        return False
+
 def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
     """Generar reporte PDF completo"""
     try:
@@ -283,7 +299,7 @@ def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
         if not weekly_summary.empty:
             pdf.set_font("Arial", 'B', 9)
             w_wk = [80, 40, 40]
-            h_wk = ["Equipo", "Total Semanal", "% Distrib Semanal"]
+            h_wk = ["Equipo", "Total Semanal", "% Semanal"]
             start_x = 25
             pdf.set_x(start_x)
             for w, h in zip(w_wk, h_wk): 
@@ -350,6 +366,25 @@ def confirm_save_distribution_dialog():
         st.session_state.confirm_save = False
         st.rerun()
 
+@st.dialog("🎉 ¡Reserva Confirmada!")
+def show_reservation_success_dialog(equipo, fecha, piso, tipo="puesto"):
+    if tipo == "puesto":
+        st.success(f"✅ **Reserva confirmada exitosamente**")
+        st.write(f"**Equipo:** {equipo}")
+        st.write(f"**Fecha:** {fecha}")
+        st.write(f"**Ubicación:** {piso}")
+        st.write(f"**Tipo:** Puesto Flexible")
+    else:
+        st.success(f"✅ **Reserva de sala confirmada exitosamente**")
+        st.write(f"**Equipo:** {equipo}")
+        st.write(f"**Fecha:** {fecha}")
+        st.write(f"**Sala:** {piso}")
+    
+    st.balloons()
+    
+    if st.button("🔄 Continuar", type="primary", use_container_width=True):
+        st.rerun()
+
 # ---------------------------------------------------------
 # MENÚ PRINCIPAL
 # ---------------------------------------------------------
@@ -368,10 +403,26 @@ if menu == "Vista Pública":
         st.subheader("🏆 Ranking Uso de Salas")
         reservas_salas = clean_reservation_df(get_room_reservations_df(conn), "sala")
         if not reservas_salas.empty and 'Nombre' in reservas_salas.columns:
+            # Calcular métricas de uso
+            total_reservas_salas = len(reservas_salas)
             ranking_salas = reservas_salas['Nombre'].value_counts().head(10).reset_index()
             ranking_salas.columns = ['Equipo', 'Reservas']
+            
+            # Calcular porcentajes
+            ranking_salas['% Diario'] = (ranking_salas['Reservas'] / total_reservas_salas * 100).round(1)
+            ranking_salas['% Semanal'] = (ranking_salas['% Diario'] * 7).round(1)  # Aproximación
+            ranking_salas['% Mensual'] = (ranking_salas['% Diario'] * 30).round(1)  # Aproximación
+            
             for idx, (_, row) in enumerate(ranking_salas.iterrows(), 1):
-                st.write(f"{idx}. **{row['Equipo']}** - {row['Reservas']} reservas")
+                with st.container(border=True):
+                    st.write(f"**{idx}. {row['Equipo']}**")
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    with col_p1:
+                        st.metric("Diario", f"{row['% Diario']}%")
+                    with col_p2:
+                        st.metric("Semanal", f"{row['% Semanal']}%")
+                    with col_p3:
+                        st.metric("Mensual", f"{row['% Mensual']}%")
         else:
             st.info("No hay datos de reservas de salas")
     
@@ -379,10 +430,26 @@ if menu == "Vista Pública":
         st.subheader("🏆 Ranking Uso Puestos Flex")
         reservas_puestos = clean_reservation_df(list_reservations_df(conn), "puesto")
         if not reservas_puestos.empty and 'Nombre' in reservas_puestos.columns:
+            # Calcular métricas de uso
+            total_reservas_puestos = len(reservas_puestos)
             ranking_puestos = reservas_puestos['Nombre'].value_counts().head(10).reset_index()
             ranking_puestos.columns = ['Equipo', 'Reservas']
+            
+            # Calcular porcentajes
+            ranking_puestos['% Diario'] = (ranking_puestos['Reservas'] / total_reservas_puestos * 100).round(1)
+            ranking_puestos['% Semanal'] = (ranking_puestos['% Diario'] * 7).round(1)
+            ranking_puestos['% Mensual'] = (ranking_puestos['% Diario'] * 30).round(1)
+            
             for idx, (_, row) in enumerate(ranking_puestos.iterrows(), 1):
-                st.write(f"{idx}. **{row['Equipo']}** - {row['Reservas']} reservas")
+                with st.container(border=True):
+                    st.write(f"**{idx}. {row['Equipo']}**")
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    with col_p1:
+                        st.metric("Diario", f"{row['% Diario']}%")
+                    with col_p2:
+                        st.metric("Semanal", f"{row['% Semanal']}%")
+                    with col_p3:
+                        st.metric("Mensual", f"{row['% Mensual']}%")
         else:
             st.info("No hay datos de reservas de puestos")
     
@@ -498,24 +565,53 @@ elif menu == "Reservas":
                     dia_semana = ORDER_DIAS[fecha.weekday()] if fecha.weekday() < 5 else "Fin de Semana"
                     st.info(f"📅 Día seleccionado: **{dia_semana}**")
                 
-                # Mostrar disponibilidad en tiempo real
+                # Mostrar disponibilidad en tiempo real MEJORADA
                 if fecha and piso and fecha.weekday() < 5:
                     cupos_disponibles, cupos_totales = get_available_slots(conn, piso, fecha)
                     
-                    # Mostrar indicador de disponibilidad
-                    st.subheader("📊 Disponibilidad")
+                    # Mostrar indicador de disponibilidad MEJORADO
+                    st.subheader("📊 Disponibilidad en Tiempo Real")
                     
                     col_avail1, col_avail2 = st.columns(2)
                     with col_avail1:
-                        st.metric("Cupos Disponibles", cupos_disponibles)
+                        st.metric("Cupos Disponibles", cupos_disponibles, delta=f"de {cupos_totales} totales")
                     with col_avail2:
-                        st.metric("Capacidad Total", cupos_totales)
+                        cupos_ocupados = cupos_totales - cupos_disponibles
+                        st.metric("Cupos Ocupados", cupos_ocupados, delta=f"de {cupos_totales} totales")
                     
-                    # Barra de progreso
+                    # Barra de progreso MEJORADA con colores
                     if cupos_totales > 0:
-                        porcentaje_ocupado = ((cupos_totales - cupos_disponibles) / cupos_totales) * 100
-                        st.progress(porcentaje_ocupado / 100)
-                        st.caption(f"🟢 {cupos_disponibles} disponibles de {cupos_totales} totales")
+                        porcentaje_disponible = (cupos_disponibles / cupos_totales) * 100
+                        porcentaje_ocupado = 100 - porcentaje_disponible
+                        
+                        # Crear barra visual con colores
+                        st.markdown("**Estado de disponibilidad:**")
+                        
+                        # Usar columnas para crear barra visual
+                        col_green, col_red = st.columns([porcentaje_disponible, porcentaje_ocupado])
+                        
+                        with col_green:
+                            if porcentaje_disponible > 0:
+                                st.markdown(
+                                    f'<div style="background-color: #00cc66; height: 30px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">'
+                                    f'🟢 {cupos_disponibles} libres</div>', 
+                                    unsafe_allow_html=True
+                                )
+                        
+                        with col_red:
+                            if porcentaje_ocupado > 0:
+                                st.markdown(
+                                    f'<div style="background-color: #ff6666; height: 30px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">'
+                                    f'🔴 {cupos_ocupados} ocupados</div>', 
+                                    unsafe_allow_html=True
+                                )
+                        
+                        # Leyenda
+                        col_leg1, col_leg2 = st.columns(2)
+                        with col_leg1:
+                            st.markdown("🟢 **Verde = Cupos Libres**")
+                        with col_leg2:
+                            st.markdown("🔴 **Rojo = Cupos Ocupados**")
                     
                     if cupos_disponibles == 0:
                         st.warning("⚠️ No hay cupos disponibles para esta fecha y piso")
@@ -530,13 +626,15 @@ elif menu == "Reservas":
                     elif cupos_disponibles <= 0:
                         st.error("❌ No hay cupos disponibles para esta fecha")
                     else:
-                        # Verificar límite mensual
+                        # Verificar límite mensual MEJORADO
                         reservas_mes = count_monthly_free_spots(conn, email, fecha)
-                        st.info(f"📊 Usted tiene {reservas_mes} reservas flex este mes")
-                        
+
                         if reservas_mes >= 2:
-                            st.error(f"❌ Ha alcanzado el límite máximo de 2 reservas flex por mes")
+                            st.error("🚫 **SOLO SE PUEDEN REALIZAR DOS RESERVAS MENSUALES POR EQUIPO**")
+                            st.info(f"📊 Usted ya utilizó sus {reservas_mes} reservas flexibles este mes")
                         else:
+                            st.success(f"📊 Usted tiene {reservas_mes} de 2 reservas flexibles utilizadas este mes")
+                            
                             # Verificar si ya tiene reserva para esta fecha
                             if user_has_reservation(conn, email, str(fecha)):
                                 st.error("❌ Ya tiene una reserva registrada para esta fecha")
@@ -544,8 +642,13 @@ elif menu == "Reservas":
                                 try:
                                     add_reservation(conn, equipo, email, piso, str(fecha), "Cupos libres", 
                                                   datetime.datetime.now().isoformat())
-                                    st.success(f"✅ Reserva confirmada para **{equipo}** el {fecha}")
-                                    st.toast("✅ Reserva confirmada exitosamente", icon="✅")
+                                    
+                                    # POPUP de confirmación
+                                    show_reservation_success_dialog(equipo, fecha, piso, "puesto")
+                                    
+                                    # Actualizar inmediatamente la disponibilidad
+                                    force_refresh_data()
+                                    
                                 except Exception as e:
                                     st.error(f"❌ Error al guardar reserva: {e}")
 
@@ -588,9 +691,31 @@ elif menu == "Reservas":
                                           generate_time_slots("08:30", "20:30", 30),
                                           index=1, key="hora_fin")
                 
+                # Validación de horas MEJORADA
+                hora_valida = True
+                try:
+                    hora_inicio_dt = datetime.datetime.strptime(hora_inicio, "%H:%M")
+                    hora_fin_dt = datetime.datetime.strptime(hora_fin, "%H:%M")
+                    
+                    if hora_fin_dt <= hora_inicio_dt:
+                        st.error("❌ La hora de fin debe ser posterior a la hora de inicio")
+                        hora_valida = False
+                    else:
+                        # Verificar que la reserva tenga al menos 30 minutos
+                        diferencia = hora_fin_dt - hora_inicio_dt
+                        if diferencia.total_seconds() < 1800:  # 30 minutos en segundos
+                            st.error("❌ La reserva debe tener al menos 30 minutos de duración")
+                            hora_valida = False
+                        else:
+                            hora_valida = True
+                            st.success("✅ Horario válido")
+                except ValueError:
+                    st.error("❌ Error en el formato de horas")
+                    hora_valida = False
+                
                 submitted_sala = st.form_submit_button("🏢 Confirmar Reserva de Sala", type="primary")
                 
-                if submitted_sala:
+                if submitted_sala and hora_valida:
                     if not equipo_sala or not email_sala:
                         st.error("❌ Complete todos los campos obligatorios")
                     else:
@@ -610,8 +735,13 @@ elif menu == "Reservas":
                                 add_room_reservation(conn, equipo_sala, email_sala, piso_sala, sala, 
                                                    str(fecha_sala), hora_inicio, hora_fin,
                                                    datetime.datetime.now().isoformat())
-                                st.success(f"✅ Sala **{sala}** reservada para **{equipo_sala}**")
-                                st.toast("✅ Reserva de sala confirmada exitosamente", icon="✅")
+                                
+                                # POPUP de confirmación
+                                show_reservation_success_dialog(equipo_sala, fecha_sala, sala, "sala")
+                                
+                                # Actualizar inmediatamente
+                                force_refresh_data()
+                                
                             except Exception as e:
                                 st.error(f"❌ Error al reservar sala: {e}")
 
@@ -787,14 +917,31 @@ elif menu == "Administrador":
             df_preview = pd.DataFrame(st.session_state.generated_rows)
             st.dataframe(apply_sorting_to_df(df_preview), use_container_width=True)
             
-            # Estadísticas - SOLO si df_equipos está disponible
+            # Estadísticas - Con manejo de errores mejorado
             if st.session_state.generated_rows and 'df_equipos' in st.session_state:
-                stats = calculate_distribution_stats(st.session_state.generated_rows, st.session_state.df_equipos)
-                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-                col_stat1.metric("Total Cupos", stats['total_cupos_asignados'])
-                col_stat2.metric("Cupos Libres", stats['cupos_libres'])
-                col_stat3.metric("Equipos con Déficit", stats['equipos_con_deficit'])
-                col_stat4.metric("Uniformidad", f"{stats['uniformidad']:.1f}")
+                try:
+                    stats = calculate_distribution_stats(st.session_state.generated_rows, st.session_state.df_equipos)
+                    
+                    # Verificar que stats tiene las claves esperadas
+                    required_keys = ['total_cupos_asignados', 'cupos_libres', 'equipos_con_deficit', 'uniformidad']
+                    for key in required_keys:
+                        if key not in stats:
+                            stats[key] = 0
+                    
+                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                    col_stat1.metric("Total Cupos", stats['total_cupos_asignados'])
+                    col_stat2.metric("Cupos Libres", stats['cupos_libres'])
+                    col_stat3.metric("Equipos con Déficit", stats['equipos_con_deficit'])
+                    col_stat4.metric("Uniformidad", f"{stats['uniformidad']:.1f}")
+                    
+                except Exception as e:
+                    st.error(f"Error calculando estadísticas: {e}")
+                    # Mostrar métricas por defecto
+                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                    col_stat1.metric("Total Cupos", 0)
+                    col_stat2.metric("Cupos Libres", 0)
+                    col_stat3.metric("Equipos con Déficit", 0)
+                    col_stat4.metric("Uniformidad", "0.0")
             
             # Botón para guardar
             if st.button("💾 Guardar Distribución Definitiva", type="primary"):
