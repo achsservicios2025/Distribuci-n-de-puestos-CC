@@ -174,16 +174,26 @@ def delete_reservation_from_db(conn, user_name, date_str, team_area):
     except: return False
 
 def count_monthly_free_spots(conn, identifier, date_obj):
+    """Contar reservas flex mensuales con verificación estricta"""
     df = list_reservations_df(conn) 
-    if df.empty: return 0
+    if df.empty: 
+        return 0
     
     try:
-        m_str = date_obj.strftime("%Y-%m")
-        mask = ((df['user_email'].astype(str)==identifier)|(df['user_name'].astype(str)==identifier)) & \
-               (df['reservation_date'].astype(str).str.contains(m_str)) & \
-               (df['team_area']=='Cupos libres')
+        # Obtener mes y año de la fecha
+        month_year = date_obj.strftime("%Y-%m")
+        
+        # Filtrar reservas del mismo mes y año
+        mask = (
+            (df['user_email'].astype(str) == str(identifier)) & 
+            (df['reservation_date'].astype(str).str.startswith(month_year)) &
+            (df['team_area'] == 'Cupos libres')
+        )
+        
         return len(df[mask])
-    except: return 0
+    except Exception as e:
+        print(f"Error contando reservas mensuales: {e}")
+        return 0
 
 # --- SALAS ---
 
@@ -325,3 +335,4 @@ def perform_granular_delete(conn, option):
         pass
         
     return ", ".join(msg) + "."
+
