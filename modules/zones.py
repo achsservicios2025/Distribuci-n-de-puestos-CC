@@ -18,7 +18,6 @@ PLANOS_DIR.mkdir(exist_ok=True)
 COLORED_DIR.mkdir(exist_ok=True)
 
 # --- HELPERS ---
-
 def _hex_to_rgba(hex_color, alpha=100):
     try:
         rgb = ImageColor.getrgb(hex_color)
@@ -47,19 +46,17 @@ def get_custom_font(font_name, size):
     }
     filename = font_files.get(font_name, "arial.ttf")
     try:
-        # Buscar en el directorio actual o en el sistema (dependiendo de la instalación PIL/sistema)
         return ImageFont.truetype(filename, size)
     except:
         try: return ImageFont.truetype("arial.ttf", size)
         except: return ImageFont.load_default()
 
 # --- HEADER CON TÍTULO Y SUBTÍTULO (POSICIÓN CENTRAL) ---
-
 def create_header_image(width, config, logo_path=None):
     bg_color = config.get("bg_color", "#FFFFFF")
     use_logo = config.get("use_logo", False)
     logo_w_req = config.get("logo_width", 150)
-    logo_align = config.get("logo_align", "Izquierda") # OBTENEMOS LA NUEVA ALINEACIÓN
+    logo_align = config.get("logo_align", "Izquierda") # Nueva opción
     
     # Título
     t_text = config.get("title_text", "")
@@ -71,7 +68,7 @@ def create_header_image(width, config, logo_path=None):
     # Subtítulo
     s_text = config.get("subtitle_text", "")
     s_font = config.get("subtitle_font", "Arial") 
-    s_size = config.get("subtitle_size", 24)     
+    s_size = config.get("subtitle_size", 24)      
     s_color = config.get("subtitle_color", "#666666")
     s_align = config.get("subtitle_align", "Centro") 
     
@@ -80,9 +77,9 @@ def create_header_image(width, config, logo_path=None):
     font_s = get_custom_font(s_font, s_size)
     
     try: h_t = font_t.getbbox(t_text)[3] - font_t.getbbox(t_text)[1] if t_text else 0
-    except: h_t = t_size # Fallback
+    except: h_t = t_size 
     try: h_s = font_s.getbbox(s_text)[3] - font_s.getbbox(s_text)[1] if s_text else 0
-    except: h_s = s_size # Fallback
+    except: h_s = s_size 
     
     gap_px = 20 if s_text else 0 
     padding_top = 40
@@ -91,7 +88,7 @@ def create_header_image(width, config, logo_path=None):
     logo_h = 0
     logo_w = 0
     
-    if use_logo and logo_path and os.path.exists(logo_path):
+    if use_logo and logo_path and os.path.exists(logo_path) and logo_align != "Oculto":
         logo_img = Image.open(logo_path).convert("RGBA")
         asp = logo_img.height / logo_img.width
         logo_w = logo_w_req
@@ -112,26 +109,21 @@ def create_header_image(width, config, logo_path=None):
     current_y = block_y_start
     
     # 2. Logo
-    if use_logo and logo_path and os.path.exists(logo_path):
+    if use_logo and logo_path and os.path.exists(logo_path) and logo_align != "Oculto":
         try:
             logo_img = logo_img.resize((logo_w, logo_h), Image.Resampling.LANCZOS)
             
-            # Cálculo de la posición X del logo basada en logo_align
-            if logo_align == "Izquierda":
-                x_pos_logo = 30
-            elif logo_align == "Derecha":
-                x_pos_logo = width - logo_w - 30
-            else: # Centro
-                x_pos_logo = (width - logo_w) // 2 
+            if logo_align == "Izquierda": x_pos = 30
+            elif logo_align == "Derecha": x_pos = width - logo_w - 30
+            else: x_pos = (width - logo_w) // 2 # Centro
             
-            img.paste(logo_img, (x_pos_logo, current_y), logo_img)
-            current_y += logo_h + padding_top # Mover Y debajo del logo
+            img.paste(logo_img, (x_pos, current_y), logo_img)
+            current_y += logo_h + padding_top
         except Exception as e: 
             print(f"Error al cargar/posicionar logo: {e}")
             pass
             
     # Helper alineación
-    # Esta función determina la posición X del texto (Título/Subtítulo) en el ancho total
     def get_x(txt, fnt, align):
         try:
             w = fnt.getbbox(txt)[2] - fnt.getbbox(txt)[0]
@@ -142,7 +134,7 @@ def create_header_image(width, config, logo_path=None):
         elif align == "Derecha": return width - w - 30
         else: return (width - w) // 2
 
-    # 3. Dibujar Textos (Debajo del logo si existe, o en la parte superior del bloque)
+    # 3. Dibujar Textos
     
     if t_text:
         tx = get_x(t_text, font_t, t_align)
@@ -156,38 +148,28 @@ def create_header_image(width, config, logo_path=None):
     return img
 
 # --- LEYENDA (Añadido estilo configurable y alineación) ---
-
 def create_legend_image(zones_list, width, seat_counts, config, bg_color="white"):
     unique_teams = {}
-    for z in zones_list: 
-        unique_teams[z['team']] = z['color']
-    if not unique_teams: 
-        return None
+    for z in zones_list: unique_teams[z['team']] = z['color']
+    if not unique_teams: return None
 
-    # Configuración de Leyenda (Título y Elementos)
+    # Configuración de Leyenda
     leg_font = config.get("legend_font", "Arial")
     leg_size = config.get("legend_size", 14)
-    leg_align = config.get("legend_align", "Izquierda")  # Nueva opción
-    show_legend = config.get("show_legend", True)  # Nueva opción para mostrar/ocultar
+    leg_align = config.get("legend_align", "Izquierda") # Nuevo
     
-    if not show_legend:
-        return None
-
+    if leg_align == "Oculta": return None
+    
     font = get_custom_font(leg_font, leg_size)
     title_font = get_custom_font(leg_font, int(leg_size * 1.5))
     
-    padding = 30
-    row_h = int(leg_size * 2.5)
-    circ = int(leg_size * 0.7)
-    if row_h < 40: 
-        row_h = 40
+    padding = 30; row_h = int(leg_size * 2.5); circ = int(leg_size * 0.7)
+    if row_h < 40: row_h = 40
     
     n = len(unique_teams)
     cols = 1
-    if n > 8: 
-        cols = 2
-    if n > 16: 
-        cols = 3
+    if n > 8: cols = 2
+    if n > 16: cols = 3
     rows = math.ceil(n / cols)
     
     total_h = (rows * row_h) + (padding * 2) + row_h
@@ -195,65 +177,54 @@ def create_legend_image(zones_list, width, seat_counts, config, bg_color="white"
     draw = ImageDraw.Draw(img)
     
     # Helper de alineación para la leyenda
-    def get_x_legend(txt, fnt, align, total_width=width):
-        try: 
-            w = fnt.getbbox(txt)[2] - fnt.getbbox(txt)[0]
-        except: 
-            w = 0
-        if align == "Izquierda": 
-            return padding
-        elif align == "Derecha": 
-            return total_width - w - padding
-        else:  # Centro
-            return (total_width - w) // 2
-    
+    def get_x_legend_title(txt, fnt, align):
+        try: w = fnt.getbbox(txt)[2] - fnt.getbbox(txt)[0]
+        except: w = 0
+        if align == "Izquierda": return padding
+        elif align == "Derecha": return width - w - padding
+        else: return (width - w) // 2
+        
     # 1. Título de Leyenda
     title_text = "Referencias / Equipos:"
-    title_x = get_x_legend(title_text, title_font, leg_align)
+    title_x = get_x_legend_title(title_text, title_font, leg_align)
     draw.text((title_x, 20), title_text, font=title_font, fill="black")
     
     sy = padding + row_h
-    cw = (width - (padding * 2)) / cols
+    cw = (width - (padding*2)) / cols
     
     # 2. Elementos de la Leyenda
     for i, (tm, clr) in enumerate(unique_teams.items()):
-        r_idx = i // cols
-        c_idx = i % cols
+        r_idx = i // cols; c_idx = i % cols
         py = sy + (r_idx * row_h)
         
         cp = seat_counts.get(tm, 0)
         lbl = f"{tm} ({cp} cupos)" if "Sala" not in tm else tm
 
-        # Calcular posición X para el elemento basado en alineación
+        # Calcular posición X
         if leg_align == "Izquierda":
             px_start = padding + (c_idx * cw)
-            px_text = px_start + circ * 2 + 10
-        elif leg_align == "Derecha":
+            px_text = px_start + circ*2 + 20
+        else:
+            # Centrar o derecha implica ajustar el bloque completo, aquí simplificamos a centrar en columna
             col_start = padding + (c_idx * cw)
             col_end = col_start + cw
+            
             w_lbl = font.getbbox(lbl)[2] - font.getbbox(lbl)[0]
-            w_total = circ * 2 + 10 + w_lbl
-            px_start = col_end - w_total
-            px_text = px_start + circ * 2 + 10
-        else:  # Centro
-            col_start = padding + (c_idx * cw)
-            col_center = col_start + cw / 2
-            w_lbl = font.getbbox(lbl)[2] - font.getbbox(lbl)[0]
-            w_total = circ * 2 + 10 + w_lbl
-            px_start = col_center - w_total / 2
-            px_text = px_start + circ * 2 + 10
+            w_item = (circ * 2) + 20 + w_lbl
+            
+            if leg_align == "Centro":
+                px_start = col_start + (cw - w_item) // 2
+            else: # Derecha
+                px_start = col_end - w_item
+                
+            px_text = px_start + circ*2 + 20
 
-        # Dibujar Círculo
-        draw.ellipse([px_start, py, px_start + circ*2, py + circ*2], 
-                    fill=clr, outline="black", width=2)
-        
-        # Dibujar Texto
+        draw.ellipse([px_start, py, px_start + circ*2, py + circ*2], fill=clr, outline="black", width=2)
         draw.text((px_text, py + (circ/2)), lbl, font=font, fill="black")
         
     return img
 
 # --- GENERADOR PRINCIPAL ---
-
 def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="PNG", header_config=None, logo_path=None):
     zones_data = load_zones()
     if piso_name not in zones_data or not zones_data[piso_name]: return None
@@ -273,7 +244,6 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
         for z in current:
             x,y,w,h = z['x'], z['y'], z['w'], z['h']
             rgb = _hex_to_rgba(z['color'], 100)
-            # Solo borde negro, sin texto
             d_ov.rectangle([x,y,x+w,y+h], fill=rgb, outline="black", width=2)
 
         map_img = Image.alpha_composite(base, ov).convert("RGB")
@@ -283,11 +253,7 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
         if header_config is None: header_config = {}
         head_img = create_header_image(fw, header_config, logo_path)
         
-        # LÓGICA DE VISIBILIDAD DE LEYENDA AGREGADA AQUÍ
-        use_legend = header_config.get("use_legend", True) 
-        leg_img = None
-        if use_legend:
-            leg_img = create_legend_image(current, fw, seat_counts_dict, header_config)
+        leg_img = create_legend_image(current, fw, seat_counts_dict, header_config)
 
         # 3. Unir (Verticalmente)
         parts = [head_img, map_img]
@@ -306,8 +272,6 @@ def generate_colored_plan(piso_name, dia_name, seat_counts_dict, output_format="
         out_n = f"piso_{piso_num}_{ds}_combined.{ext}"
         out_p = COLORED_DIR / out_n
         
-        # Guardar con calidad máxima. 
-        # Para PDF, PIL ajusta automáticamente el tamaño de la hoja a la imagen
         final.save(out_p, quality=95)
             
         return out_p
