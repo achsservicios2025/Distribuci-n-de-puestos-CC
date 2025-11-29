@@ -12,65 +12,57 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-@st.cache_resource(ttl=600)  # Agregado TTL para refrescar conexión cada 10 min
+@st.cache_resource(ttl=600)
 def get_conn():
-    """Conecta a Google Sheets con caché y reconexión automática."""
+    """Conecta a Google Sheets con caché y reporte de errores visible."""
     try:
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            client = gspread.authorize(creds)
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ Error: Faltan los secretos 'gcp_service_account'.")
+            return None
             
-            if "sheets" in st.secrets and "sheet_name" in st.secrets["sheets"]:
-                sheet_name = st.secrets["sheets"]["sheet_name"] 
-                return client.open(sheet_name)
-            else:
-                st.error("❌ Falta la configuración 'sheet_name' en st.secrets")
-                return None
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        client = gspread.authorize(creds)
         
-        st.error("❌ No se encontraron credenciales 'gcp_service_account' en secrets.")
-        return None
+        if "sheets" not in st.secrets or "sheet_name" not in st.secrets["sheets"]:
+            st.error("❌ Error: Falta 'sheet_name' en los secretos.")
+            return None
+            
+        sheet_name = st.secrets["sheets"]["sheet_name"] 
+        return client.open(sheet_name)
+        
     except Exception as e:
-        print(f"Error conectando a Google Sheets: {e}") 
-        # Evitamos st.error aquí para no ensuciar la UI si es un reintento interno
+        # Es CRUCIAL mostrar este error en pantalla para no dejarla en blanco
+        st.error(f"🔥 Error crítico de conexión a Google Sheets: {e}")
         return None
 
 def get_worksheet(conn, sheet_name):
-    """Obtiene pestaña con reintento robusto anti-caídas."""
+    """Obtiene pestaña de forma rápida y segura."""
     if conn is None:
         return None
 
-    for attempt in range(3):
+    try:
+        # Intento directo
+        return conn.worksheet(sheet_name)
+    except WorksheetNotFound:
+        # Si no existe, intentamos crearla UNA VEZ
         try:
-            # Intentamos obtener la hoja
-            return conn.worksheet(sheet_name)
-        except WorksheetNotFound:
-            # Si no existe, intentamos crearla
-            try:
-                time.sleep(1)
-                return conn.add_worksheet(title=sheet_name, rows=100, cols=20)
-            except Exception as e:
-                print(f"Error creando hoja '{sheet_name}': {e}")
-                # Si falla crearla, esperamos un poco y reintentamos el bucle principal
-                time.sleep(1)
-                continue 
-        except APIError as e:
-            # Manejo de límites de API (Error 429)
-            if "429" in str(e):
-                wait_time = 2 * (attempt + 1)
-                print(f"API Rate limit, esperando {wait_time}s...")
-                time.sleep(wait_time)
-                continue
-            print(f"Error API crítico en get_worksheet: {e}")
-            return None 
+            return conn.add_worksheet(title=sheet_name, rows=100, cols=20)
         except Exception as e:
-            print(f"Error inesperado en get_worksheet: {e}")
+            print(f"⚠️ No se pudo crear la hoja '{sheet_name}': {e}")
             return None
-            
-    return None
+    except APIError as e:
+        if "429" in str(e): # Rate limit
+            time.sleep(2)
+            try: return conn.worksheet(sheet_name)
+            except: return None
+        print(f"Error API: {e}")
+        return None
+    except Exception:
+        return None
 
 def init_db(conn):
-    """Inicializa DB verificando que existan todas las hojas."""
+    """Inicializa DB verificando headers."""
     if conn is None: return 
     
     sheets_config = {
@@ -81,17 +73,15 @@ def init_db(conn):
         "reset_tokens": ["token", "created_at", "expires_at", "used"]
     }
     
-    # Verificación silenciosa para no bloquear la UI
+    # Iteración rápida sin sleeps artificiales
     for name, headers in sheets_config.items():
         ws = get_worksheet(conn, name)
         if ws:
             try:
-                # Si la hoja está vacía, ponemos los headers
+                # Chequeo ligero para no consumir mucha cuota de lectura
                 if not ws.row_values(1): 
                     ws.append_row(headers)
-            except Exception as e: 
-                print(f"Error inicializando headers para {name}: {e}")
-        time.sleep(0.1) # Pequeña pausa para no saturar la API
+            except: pass
 
 # --- FUNCIONES DE LECTURA (CON CACHÉ Y LIMPIEZA) ---
 
@@ -99,18 +89,14 @@ def init_db(conn):
 def read_distribution_df(_conn):
     ws = get_worksheet(_conn, "distribution")
     if ws is None: return pd.DataFrame() 
-    
     try:
-        data = ws.get_all_records()
-        return pd.DataFrame(data)
-    except Exception as e:
-        print(f"Error leyendo distribution: {e}")
+        return pd.DataFrame(ws.get_all_records())
+    except:
         return pd.DataFrame()
 
 def insert_distribution(conn, rows):
     ws = get_worksheet(conn, "distribution")
     if ws is None: return 
-    
     try:
         ws.clear()
         ws.append_row(["piso", "equipo", "dia", "cupos", "pct", "created_at"])
@@ -126,18 +112,14 @@ def insert_distribution(conn, rows):
                 str(r.get('%Distrib', r.get('pct',0))), 
                 now
             ])
-        
         if data: ws.append_rows(data)
-        
         read_distribution_df.clear() 
-        st.cache_data.clear() 
     except Exception as e:
-        st.error(f"Error guardando distribución: {e}")
+        st.error(f"Error guardando: {e}")
 
 def clear_distribution(conn):
     ws = get_worksheet(conn, "distribution")
     if ws is None: return
-    
     try:
         ws.clear()
         read_distribution_df.clear()
@@ -148,7 +130,6 @@ def clear_distribution(conn):
 def add_reservation(conn, name, email, piso, date_str, area, created_at):
     ws = get_worksheet(conn, "reservations")
     if ws is None: return
-    
     try:
         ws.append_row([name, email, piso, date_str, area, created_at])
         list_reservations_df.clear()
@@ -158,11 +139,11 @@ def add_reservation(conn, name, email, piso, date_str, area, created_at):
 def user_has_reservation(conn, email, date_str):
     ws = get_worksheet(conn, "reservations")
     if ws is None: return False
-    
     try:
         records = ws.get_all_records()
         df = pd.DataFrame(records)
         if df.empty: return False
+        # Normalización básica para evitar errores de tipo
         match = df[(df['user_email'].astype(str) == str(email)) & (df['reservation_date'].astype(str) == str(date_str))]
         return not match.empty
     except: return False
@@ -171,33 +152,27 @@ def user_has_reservation(conn, email, date_str):
 def list_reservations_df(_conn):
     ws = get_worksheet(_conn, "reservations")
     if ws is None: return pd.DataFrame()
-    
     try: return pd.DataFrame(ws.get_all_records())
     except: return pd.DataFrame()
 
 def delete_reservation_from_db(conn, user_name, date_str, team_area):
     ws = get_worksheet(conn, "reservations")
     if ws is None: return False
-    
     try:
-        # Búsqueda optimizada por fecha primero
+        # Búsqueda optimizada
         cell_list = ws.findall(str(date_str))
         for cell in cell_list:
             row_val = ws.row_values(cell.row)
-            # row_val indexes: 0=name, 1=email, 2=piso, 3=date, 4=area
             if len(row_val) >= 5 and row_val[0] == user_name and row_val[4] == team_area:
                 ws.delete_rows(cell.row)
                 list_reservations_df.clear()
                 return True
         return False
-    except Exception as e:
-        print(f"Error borrando reserva: {e}")
-        return False
+    except: return False
 
 def count_monthly_free_spots(conn, identifier, date_obj):
     df = list_reservations_df(conn) 
     if df.empty: return 0
-    
     try:
         m_str = date_obj.strftime("%Y-%m")
         mask = ((df['user_email'].astype(str)==identifier)|(df['user_name'].astype(str)==identifier)) & \
@@ -211,7 +186,6 @@ def count_monthly_free_spots(conn, identifier, date_obj):
 def add_room_reservation(conn, name, email, piso, room, date, start, end, created):
     ws = get_worksheet(conn, "room_reservations")
     if ws is None: return
-    
     try:
         ws.append_row([name, email, piso, room, date, start, end, created])
         get_room_reservations_df.clear()
@@ -221,19 +195,16 @@ def add_room_reservation(conn, name, email, piso, room, date, start, end, create
 def get_room_reservations_df(_conn):
     ws = get_worksheet(_conn, "room_reservations")
     if ws is None: return pd.DataFrame()
-    
     try: return pd.DataFrame(ws.get_all_records())
     except: return pd.DataFrame()
 
 def delete_room_reservation_from_db(conn, user, date, room, start):
     ws = get_worksheet(conn, "room_reservations")
     if ws is None: return False
-    
     try:
         cell_list = ws.findall(str(date))
         for cell in cell_list:
             row_val = ws.row_values(cell.row)
-            # Indexes: 0=name, 3=room, 4=date, 5=start
             if len(row_val) >= 6 and row_val[0] == user and row_val[3] == room and row_val[5] == str(start):
                 ws.delete_rows(cell.row)
                 get_room_reservations_df.clear()
@@ -246,29 +217,23 @@ def delete_room_reservation_from_db(conn, user, date, room, start):
 def save_setting(conn, key, value):
     ws = get_worksheet(conn, "settings")
     if ws is None: return
-    
     try:
         cell = ws.find(key, in_column=1)
         ws.update_cell(cell.row, 2, value)
-    except Exception as e:
-        # Si no encuentra la celda, intentamos añadirla
-        try: 
-            ws.append_row([key, value, datetime.datetime.now().isoformat()])
-        except: 
-            pass
+    except:
+        try: ws.append_row([key, value, datetime.datetime.now().isoformat()])
+        except: pass
     get_all_settings.clear()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_settings(_conn):
     ws = get_worksheet(_conn, "settings")
     if ws is None: return {}
-    
     try: return {r['key']: r['value'] for r in ws.get_all_records()}
     except: return {}
 
 def ensure_reset_table(conn): 
-    if conn is None: return
-    pass
+    pass # No-op para mantener compatibilidad
 
 def save_reset_token(conn, t, e): 
     ws = get_worksheet(conn, "reset_tokens")
@@ -279,7 +244,6 @@ def save_reset_token(conn, t, e):
 def validate_and_consume_token(conn, t):
     ws = get_worksheet(conn, "reset_tokens")
     if ws is None: return False, "Error de conexión"
-    
     try:
         cell = ws.find(t)
         if not cell: return False, "Inválido"
@@ -291,7 +255,6 @@ def validate_and_consume_token(conn, t):
 
 def perform_granular_delete(conn, option):
     if conn is None: return "Error: No hay conexión."
-    
     msg = []
     try:
         if "RESERVAS" in option or "TODO" in option:
@@ -317,11 +280,8 @@ def perform_granular_delete(conn, option):
                 read_distribution_df.clear()
                 msg.append("Distribución eliminada")
         
-        if "ZONAS" in option or "TODO" in option:
-            # Zonas se manejan en archivo local, esta opción es simbólica aquí si no hay sheet de zonas
-            pass
-
+        # Zonas es local, no sheet
     except Exception as e:
-        return f"Error durante el borrado: {e}"
+        return f"Error: {e}"
         
     return ", ".join(msg) + "."
