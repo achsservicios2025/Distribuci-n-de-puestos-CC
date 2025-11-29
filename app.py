@@ -31,7 +31,7 @@ try:
         delete_room_reservation_from_db, perform_granular_delete,
         ensure_reset_table, save_reset_token, validate_and_consume_token
     )
-    from modules.seats import compute_distribution_from_excel, get_ideal_distribution_proposal, calculate_distribution_stats
+    from modules.seats import compute_distribution_from_excel, get_ideal_distribution_proposal, calculate_distribution_stats, get_realistic_distribution_proposal
     from modules.rooms import generate_time_slots, check_room_conflict
     from modules.zones import generate_colored_plan, load_zones, save_zones
     
@@ -118,7 +118,7 @@ def apply_sorting_to_df(df):
     return df
 
 def calculate_weekly_usage_summary(distrib_df):
-    """Calcular resumen semanal mejorado con porcentajes"""
+    """Calcular resumen semanal mejorado con porcentajes realistas"""
     if distrib_df.empty: 
         return pd.DataFrame()
     
@@ -134,17 +134,17 @@ def calculate_weekly_usage_summary(distrib_df):
         }).reset_index()
         weekly.columns = ['Equipo', 'Total Cupos Semanales']
         
-        # Calcular porcentaje de distribución semanal
-        total_semanal = weekly['Total Cupos Semanales'].sum()
-        if total_semanal > 0:
-            weekly['% Distribución Semanal'] = (weekly['Total Cupos Semanales'] / total_semanal * 100).round(1)
+        # Calcular porcentaje de distribución semanal BASADO EN CUPOS TOTALES
+        total_cupos_semanales = weekly['Total Cupos Semanales'].sum()
+        if total_cupos_semanales > 0:
+            weekly['% Semanal'] = (weekly['Total Cupos Semanales'] / total_cupos_semanales * 100).round(1)
         else:
-            weekly['% Distribución Semanal'] = 0
+            weekly['% Semanal'] = 0
         
-        # Calcular porcentaje mensual (aproximado)
-        weekly['% Mensual'] = (weekly['% Distribución Semanal'] * 4).round(1)
+        # Calcular porcentaje mensual aproximado
+        weekly['% Mensual'] = (weekly['% Semanal']).round(1)  # Mismo que semanal para vista simplificada
             
-        return weekly[['Equipo', '% Distribución Semanal', '% Mensual']].sort_values('% Distribución Semanal', ascending=False)
+        return weekly[['Equipo', '% Semanal', '% Mensual']].sort_values('% Semanal', ascending=False)
     except Exception as e:
         st.error(f"Error calculando resumen: {e}")
         return pd.DataFrame()
@@ -188,6 +188,42 @@ def clean_reservation_df(df, tipo="puesto"):
         return df
     except:
         return df
+
+def get_available_slots(conn, piso, fecha):
+    """Obtener cupos disponibles en tiempo real para un piso y fecha"""
+    try:
+        # Obtener distribución base
+        df_distrib = read_distribution_df(conn)
+        dia_nombre = ORDER_DIAS[fecha.weekday()]
+        
+        # Cupos totales para ese piso y día
+        distrib_dia = df_distrib[(df_distrib['piso'] == piso) & 
+                                (df_distrib['dia'] == dia_nombre) &
+                                (df_distrib['equipo'] == 'Cupos libres')]
+        
+        if distrib_dia.empty:
+            return 0, 0
+        
+        cupos_totales = int(distrib_dia.iloc[0]['cupos'])
+        
+        # Cupos ya reservados
+        reservas_existentes = list_reservations_df(conn)
+        if not reservas_existentes.empty:
+            reservas_dia = reservas_existentes[
+                (reservas_existentes['piso'] == piso) &
+                (reservas_existentes['reservation_date'] == str(fecha)) &
+                (reservas_existentes['team_area'] == 'Cupos libres')
+            ]
+            cupos_ocupados = len(reservas_dia)
+        else:
+            cupos_ocupados = 0
+            
+        cupos_disponibles = max(0, cupos_totales - cupos_ocupados)
+        return cupos_disponibles, cupos_totales
+        
+    except Exception as e:
+        st.error(f"Error calculando disponibilidad: {e}")
+        return 0, 0
 
 def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
     """Generar reporte PDF completo"""
@@ -247,7 +283,7 @@ def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
         if not weekly_summary.empty:
             pdf.set_font("Arial", 'B', 9)
             w_wk = [80, 40, 40]
-            h_wk = ["Equipo", "% Distrib Semanal", "% Mensual"]
+            h_wk = ["Equipo", "Total Semanal", "% Distrib Semanal"]
             start_x = 25
             pdf.set_x(start_x)
             for w, h in zip(w_wk, h_wk): 
@@ -258,8 +294,8 @@ def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
             for _, row in weekly_summary.iterrows():
                 pdf.set_x(start_x)
                 pdf.cell(w_wk[0], 6, str(row["Equipo"])[:30], 1)
-                pdf.cell(w_wk[1], 6, f"{row['% Distribución Semanal']}%", 1)
-                pdf.cell(w_wk[2], 6, f"{row['% Mensual']}%", 1)
+                pdf.cell(w_wk[1], 6, str(int(row["Total Cupos Semanales"])), 1)
+                pdf.cell(w_wk[2], 6, f"{row['% Semanal']}%", 1)
                 pdf.ln()
         
         return pdf.output(dest='S').encode('latin-1')
@@ -267,42 +303,6 @@ def generate_full_pdf_report(distrib_df, logo_path, deficit_data=None):
     except Exception as e:
         st.error(f"Error generando PDF: {e}")
         return None
-
-def get_available_slots(conn, piso, fecha):
-    """Obtener cupos disponibles en tiempo real para un piso y fecha"""
-    try:
-        # Obtener distribución base
-        df_distrib = read_distribution_df(conn)
-        dia_nombre = ORDER_DIAS[fecha.weekday()]
-        
-        # Cupos totales para ese piso y día
-        distrib_dia = df_distrib[(df_distrib['piso'] == piso) & 
-                                (df_distrib['dia'] == dia_nombre) &
-                                (df_distrib['equipo'] == 'Cupos libres')]
-        
-        if distrib_dia.empty:
-            return 0, 0
-        
-        cupos_totales = int(distrib_dia.iloc[0]['cupos'])
-        
-        # Cupos ya reservados
-        reservas_existentes = list_reservations_df(conn)
-        if not reservas_existentes.empty:
-            reservas_dia = reservas_existentes[
-                (reservas_existentes['piso'] == piso) &
-                (reservas_existentes['reservation_date'] == str(fecha)) &
-                (reservas_existentes['team_area'] == 'Cupos libres')
-            ]
-            cupos_ocupados = len(reservas_dia)
-        else:
-            cupos_ocupados = 0
-            
-        cupos_disponibles = max(0, cupos_totales - cupos_ocupados)
-        return cupos_disponibles, cupos_totales
-        
-    except Exception as e:
-        st.error(f"Error calculando disponibilidad: {e}")
-        return 0, 0
 
 # ---------------------------------------------------------
 # DIÁLOGOS DE CONFIRMACIÓN
@@ -359,64 +359,94 @@ menu = st.sidebar.selectbox("Navegación", ["Vista Pública", "Reservas", "Admin
 # VISTA PÚBLICA
 # ==========================================
 if menu == "Vista Pública":
-    st.header("📊 Distribución de Cupos")
+    st.header("🏢 Sistema de Gestión de Espacios - ACHS Servicios")
     
+    # Mostrar rankings inmediatamente
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🏆 Ranking Uso de Salas")
+        reservas_salas = clean_reservation_df(get_room_reservations_df(conn), "sala")
+        if not reservas_salas.empty and 'Nombre' in reservas_salas.columns:
+            ranking_salas = reservas_salas['Nombre'].value_counts().head(10).reset_index()
+            ranking_salas.columns = ['Equipo', 'Reservas']
+            for idx, (_, row) in enumerate(ranking_salas.iterrows(), 1):
+                st.write(f"{idx}. **{row['Equipo']}** - {row['Reservas']} reservas")
+        else:
+            st.info("No hay datos de reservas de salas")
+    
+    with col2:
+        st.subheader("🏆 Ranking Uso Puestos Flex")
+        reservas_puestos = clean_reservation_df(list_reservations_df(conn), "puesto")
+        if not reservas_puestos.empty and 'Nombre' in reservas_puestos.columns:
+            ranking_puestos = reservas_puestos['Nombre'].value_counts().head(10).reset_index()
+            ranking_puestos.columns = ['Equipo', 'Reservas']
+            for idx, (_, row) in enumerate(ranking_puestos.iterrows(), 1):
+                st.write(f"{idx}. **{row['Equipo']}** - {row['Reservas']} reservas")
+        else:
+            st.info("No hay datos de reservas de puestos")
+    
+    st.markdown("---")
+    
+    # Reservas activas de salas (transparentar uso)
+    st.subheader("📅 Reservas Activas de Salas")
+    reservas_salas_activas = clean_reservation_df(get_room_reservations_df(conn), "sala")
+    if not reservas_salas_activas.empty:
+        # Mostrar solo reservas futuras
+        hoy = datetime.date.today()
+        reservas_futuras = []
+        for _, reserva in reservas_salas_activas.iterrows():
+            try:
+                fecha_reserva = datetime.datetime.strptime(reserva['Fecha'], '%Y-%m-%d').date()
+                if fecha_reserva >= hoy:
+                    reservas_futuras.append(reserva)
+            except:
+                continue
+        
+        if reservas_futuras:
+            df_futuras = pd.DataFrame(reservas_futuras)
+            # Ordenar por fecha
+            df_futuras['Fecha'] = pd.to_datetime(df_futuras['Fecha'])
+            df_futuras = df_futuras.sort_values('Fecha')
+            
+            for _, reserva in df_futuras.head(15).iterrows():  # Mostrar solo 15 más recientes
+                with st.container(border=True):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**{reserva['Nombre']}**")
+                        st.write(f"📅 {reserva['Fecha'].strftime('%d/%m/%Y')} | 🕒 {reserva['Inicio']} - {reserva['Fin']}")
+                        st.write(f"📍 {reserva['Sala']} | 🏢 {reserva['Piso']}")
+                    with col2:
+                        st.write("👥 **Equipo:**")
+                        st.write(reserva['Correo'].split('@')[0] if '@' in str(reserva['Correo']) else reserva['Correo'])
+        else:
+            st.info("No hay reservas futuras de salas")
+    else:
+        st.info("No hay reservas de salas registradas")
+    
+    st.markdown("---")
+    
+    # Distribución de cupos (en acordeones para compactar)
     try:
         df = read_distribution_df(conn)
         
         if not df.empty:
-            st.success(f"✅ Datos cargados: {len(df)} registros de distribución")
+            st.subheader("📊 Distribución de Cupos")
             
-            # Mostrar datos principales con menús desplegables
-            st.subheader("Distribución Completa por Piso")
+            # Resumen compacto
+            with st.expander("📈 Resumen Semanal por Equipo", expanded=False):
+                weekly_summary = calculate_weekly_usage_summary(df)
+                if not weekly_summary.empty:
+                    st.dataframe(weekly_summary, use_container_width=True)
             
-            # Agrupar por piso
+            # Distribución por pisos en acordeones
             pisos = sorted(df['piso'].unique())
-            
             for piso in pisos:
-                with st.expander(f"🏢 {piso} - Ver equipos y reservas", expanded=False):
+                with st.expander(f"🏢 {piso} - Ver distribución", expanded=False):
                     df_piso = df[df['piso'] == piso]
-                    
-                    # Mostrar equipos del piso
-                    st.write(f"**Equipos en {piso}:**")
-                    equipos_piso = df_piso[df_piso['equipo'] != 'Cupos libres']['equipo'].unique()
-                    
-                    for equipo in equipos_piso:
-                        with st.expander(f"👥 {equipo}", expanded=False):
-                            df_equipo = df_piso[df_piso['equipo'] == equipo]
-                            st.dataframe(df_equipo[['dia', 'cupos', 'pct']], use_container_width=True)
-                    
-                    # Mostrar cupos libres del piso
-                    cupos_libres_piso = df_piso[df_piso['equipo'] == 'Cupos libres']
-                    if not cupos_libres_piso.empty:
-                        st.write(f"**📊 Cupos libres en {piso}:**")
-                        st.dataframe(cupos_libres_piso[['dia', 'cupos']], use_container_width=True)
-            
-            # Resumen semanal mejorado con porcentajes
-            st.subheader("📈 Resumen Semanal y Mensual por Equipo")
-            weekly_summary = calculate_weekly_usage_summary(df)
-            if not weekly_summary.empty:
-                st.dataframe(weekly_summary, use_container_width=True)
-                
-                # Métricas resumen
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    total_equipos = len(weekly_summary)
-                    st.metric("Total Equipos", total_equipos)
-                with col2:
-                    avg_weekly = weekly_summary['% Distribución Semanal'].mean()
-                    st.metric("Promedio % Semanal", f"{avg_weekly:.1f}%")
-                with col3:
-                    avg_monthly = weekly_summary['% Mensual'].mean()
-                    st.metric("Promedio % Mensual", f"{avg_monthly:.1f}%")
-                with col4:
-                    max_team = weekly_summary.loc[weekly_summary['% Distribución Semanal'].idxmax()]
-                    st.metric("Mayor % Semanal", f"{max_team['% Distribución Semanal']}%")
-            else:
-                st.info("No hay datos suficientes para el resumen semanal")
-                
+                    st.dataframe(df_piso[['equipo', 'dia', 'cupos', 'pct']], use_container_width=True)
         else:
-            st.info("📝 No hay datos de distribución cargados. Por favor, genere una distribución en el panel de Administrador.")
+            st.info("📝 No hay datos de distribución cargados.")
             
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
@@ -500,7 +530,7 @@ elif menu == "Reservas":
                     elif cupos_disponibles <= 0:
                         st.error("❌ No hay cupos disponibles para esta fecha")
                     else:
-                        # Verificar límite mensual MEJORADO
+                        # Verificar límite mensual
                         reservas_mes = count_monthly_free_spots(conn, email, fecha)
                         st.info(f"📊 Usted tiene {reservas_mes} reservas flex este mes")
                         
@@ -515,7 +545,7 @@ elif menu == "Reservas":
                                     add_reservation(conn, equipo, email, piso, str(fecha), "Cupos libres", 
                                                   datetime.datetime.now().isoformat())
                                     st.success(f"✅ Reserva confirmada para **{equipo}** el {fecha}")
-                                    st.balloons()
+                                    st.toast("✅ Reserva confirmada exitosamente", icon="✅")
                                 except Exception as e:
                                     st.error(f"❌ Error al guardar reserva: {e}")
 
@@ -581,7 +611,7 @@ elif menu == "Reservas":
                                                    str(fecha_sala), hora_inicio, hora_fin,
                                                    datetime.datetime.now().isoformat())
                                 st.success(f"✅ Sala **{sala}** reservada para **{equipo_sala}**")
-                                st.balloons()
+                                st.toast("✅ Reserva de sala confirmada exitosamente", icon="✅")
                             except Exception as e:
                                 st.error(f"❌ Error al reservar sala: {e}")
 
@@ -618,7 +648,8 @@ elif menu == "Reservas":
                             with col2:
                                 if st.button("❌ Cancelar", key=f"cancel_p_{idx}"):
                                     if delete_reservation_from_db(conn, reserva['Nombre'], reserva['Fecha Reserva'], reserva['Ubicación']):
-                                        st.success("Reserva cancelada")
+                                        st.success("✅ Reserva cancelada exitosamente")
+                                        st.toast("✅ Reserva cancelada", icon="✅")
                                         st.rerun()
                 
                 if not mis_salas.empty:
@@ -633,7 +664,8 @@ elif menu == "Reservas":
                             with col2:
                                 if st.button("❌ Cancelar", key=f"cancel_s_{idx}"):
                                     if delete_room_reservation_from_db(conn, reserva['Nombre'], reserva['Fecha'], reserva['Sala'], reserva['Inicio']):
-                                        st.success("Reserva cancelada")
+                                        st.success("✅ Reserva cancelada exitosamente")
+                                        st.toast("✅ Reserva de sala cancelada", icon="✅")
                                         st.rerun()
 
 # ==========================================
@@ -689,13 +721,13 @@ elif menu == "Administrador":
         
         col_strat1, col_strat2 = st.columns(2)
         with col_strat1:
-            ignore_params = st.checkbox("🎯 Usar distribución ideal (ignorar parámetros)", 
+            use_realistic = st.checkbox("🎯 Usar distribución realista (con déficit)", 
                                       value=True,
-                                      help="Genera distribución optimizada sin restricciones de capacidad")
+                                      help="Genera distribución realista que respeta capacidades y genera déficit")
         with col_strat2:
-            if ignore_params:
+            if use_realistic:
                 estrategia = st.selectbox("Estrategia", 
-                                        ["⚖️ Equitativa Perfecta", "🔄 Balanceada con Flex", "🎲 Aleatoria Controlada"])
+                                        ["⚖️ Equitativa Realista", "🔄 Balanceada con Flex", "🎲 Aleatoria Controlada"])
             else:
                 estrategia = st.selectbox("Estrategia Base", 
                                         ["🎲 Aleatorio", "🧩 Tetris", "🐜 Relleno"])
@@ -704,7 +736,7 @@ elif menu == "Administrador":
             "🎲 Aleatorio": "random",
             "🧩 Tetris": "size_desc", 
             "🐜 Relleno": "size_asc",
-            "⚖️ Equitativa Perfecta": "perfect_equity",
+            "⚖️ Equitativa Realista": "realistic_equity",
             "🔄 Balanceada con Flex": "balanced_flex",
             "🎲 Aleatoria Controlada": "controlled_random"
         }
@@ -712,11 +744,12 @@ elif menu == "Administrador":
         if uploaded_file and st.button("🚀 Generar Distribución", type="primary"):
             try:
                 df_equipos = pd.read_excel(uploaded_file, "Equipos")
+                st.session_state.df_equipos = df_equipos  # Guardar en session_state
                 st.success(f"✅ Equipos cargados: {len(df_equipos)} equipos")
                 
-                if ignore_params:
-                    # Generar distribución ideal
-                    rows, equipos_problema = get_ideal_distribution_proposal(df_equipos, strategy=strat_map[estrategia])
+                if use_realistic:
+                    # Generar distribución realista
+                    rows, equipos_problema = get_realistic_distribution_proposal(df_equipos, strategy=strat_map[estrategia])
                     deficit = []
                 else:
                     df_parametros = pd.read_excel(uploaded_file, "Parámetros")
@@ -733,6 +766,7 @@ elif menu == "Administrador":
                     st.session_state.generated_rows = rows
                     st.session_state.generated_deficit = deficit
                     st.success("✅ Distribución generada exitosamente")
+                    st.toast("✅ Distribución generada exitosamente", icon="✅")
                 
             except Exception as e:
                 st.error(f"❌ Error procesando archivo: {e}")
@@ -753,9 +787,9 @@ elif menu == "Administrador":
             df_preview = pd.DataFrame(st.session_state.generated_rows)
             st.dataframe(apply_sorting_to_df(df_preview), use_container_width=True)
             
-            # Estadísticas
-            if st.session_state.generated_rows:
-                stats = calculate_distribution_stats(st.session_state.generated_rows, df_equipos)
+            # Estadísticas - SOLO si df_equipos está disponible
+            if st.session_state.generated_rows and 'df_equipos' in st.session_state:
+                stats = calculate_distribution_stats(st.session_state.generated_rows, st.session_state.df_equipos)
                 col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
                 col_stat1.metric("Total Cupos", stats['total_cupos_asignados'])
                 col_stat2.metric("Cupos Libres", stats['cupos_libres'])
@@ -773,8 +807,8 @@ elif menu == "Administrador":
                     clear_distribution(conn)
                     insert_distribution(conn, st.session_state.generated_rows)
                     st.success("✅ Distribución guardada exitosamente en la base de datos")
+                    st.toast("✅ Distribución guardada exitosamente", icon="✅")
                     st.session_state.confirm_save = None
-                    st.balloons()
                 except Exception as e:
                     st.error(f"❌ Error guardando distribución: {e}")
             else:
@@ -853,6 +887,7 @@ elif menu == "Administrador":
                         
                         save_zones(zonas)
                         st.success("✅ Zona guardada exitosamente")
+                        st.toast("✅ Zona guardada exitosamente", icon="✅")
                 else:
                     st.warning("No hay equipos cargados en la distribución")
         else:
@@ -933,6 +968,7 @@ elif menu == "Administrador":
                 save_setting(conn, "admin_user", nuevo_user)
                 save_setting(conn, "admin_pass", nueva_pass)
                 st.success("✅ Credenciales actualizadas")
+                st.toast("✅ Credenciales actualizadas", icon="✅")
         
         with col_config2:
             st.write("**Configuración General**")
@@ -943,6 +979,7 @@ elif menu == "Administrador":
                 save_setting(conn, "site_title", titulo_sitio)
                 save_setting(conn, "primary", color_primario)
                 st.success("✅ Configuración aplicada")
+                st.toast("✅ Configuración aplicada", icon="✅")
     
     with tab5:
         st.subheader("Herramientas de Mantenimiento")
@@ -964,6 +1001,7 @@ elif menu == "Administrador":
                 try:
                     resultado = perform_granular_delete(conn, st.session_state.pending_delete)
                     st.success(f"✅ {resultado}")
+                    st.toast("✅ Borrado completado exitosamente", icon="✅")
                     st.session_state.confirm_delete = None
                     st.session_state.pending_delete = None
                     st.rerun()
