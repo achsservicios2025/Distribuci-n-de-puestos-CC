@@ -402,15 +402,32 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
                 
                 // Inicializar cuando la imagen cargue
                 img.onload = function() {{
-                    const aspectRatio = img.naturalHeight / img.naturalWidth;
-                    canvasHeight = Math.round(canvasWidth * aspectRatio);
-                    
-                    canvas.width = canvasWidth;
-                    canvas.height = canvasHeight;
-                    
-                    drawImageAndZones();
-                    updateZonesList();
+                    try {{
+                        const aspectRatio = img.naturalHeight / img.naturalWidth;
+                        canvasHeight = Math.round(canvasWidth * aspectRatio);
+                        
+                        canvas.width = canvasWidth;
+                        canvas.height = canvasHeight;
+                        
+                        drawImageAndZones();
+                        updateZonesList();
+                        console.log('Canvas inicializado correctamente');
+                    }} catch (e) {{
+                        console.error('Error al inicializar canvas:', e);
+                        alert('Error al cargar el plano: ' + e.message);
+                    }}
                 }};
+                
+                // Manejar errores de carga de imagen
+                img.onerror = function() {{
+                    console.error('Error al cargar la imagen');
+                    alert('Error: No se pudo cargar la imagen del plano');
+                }};
+                
+                // Si la imagen ya está cargada, inicializar de inmediato
+                if (img.complete && img.naturalWidth > 0) {{
+                    img.onload();
+                }}
                 
                 function drawImageAndZones() {{
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -617,7 +634,8 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
         '''
         
         # Componente que puede recibir valores de retorno
-        return components.html(html_code, width=canvas_width + 50, height=html_height, scrolling=False)
+        # Aumentar altura para asegurar que se vea todo
+        return components.html(html_code, width=canvas_width + 50, height=html_height + 100, scrolling=True)
         
     except Exception as e:
         st.error(f"Error al crear el componente de dibujo: {str(e)}")
@@ -1417,27 +1435,17 @@ elif menu == "Administrador":
                     else:
                         st.warning("⚠️ Selecciona un equipo y color en el panel derecho antes de dibujar")
                     
-                    # Usar el componente personalizado con guardado automático
-                    component_result = zone_editor(
-                        img_path=str(pim),
-                        existing_zones=existing_zones,
+                    # Usar el componente HTML mejorado con guardado automático
+                    drawing_component = create_enhanced_drawing_component(
+                        str(pim), 
+                        existing_zones, 
                         selected_team=selected_team,
                         selected_color=selected_color,
-                        width=600,
-                        key=f"zone_editor_{p_sel}"
+                        width=600
                     )
                     
-                    # Procesar resultado del componente (guardado automático)
-                    if component_result and component_result.get('action') == 'save':
-                        try:
-                            zones_data = component_result.get('zones', [])
-                            if zones_data:
-                                zonas[p_sel] = zones_data
-                                save_zones(zonas)
-                                st.success(f"✅ {len(zones_data)} zonas guardadas automáticamente!")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar zonas: {str(e)}")
+                    if drawing_component is None:
+                        st.error("❌ No se pudo cargar el componente de dibujo")
                     
                     # Botones de acción
                     col_btn1, col_btn2 = st.columns(2)
@@ -1457,7 +1465,29 @@ elif menu == "Administrador":
                             st.session_state[f"confirm_clear_{p_sel}"] = True
                             st.warning("⚠️ Haz clic de nuevo para confirmar la eliminación de TODAS las zonas")
                     
-                    st.info("💡 **Guardado Automático:** Dibuja zonas y haz clic en '💾 Guardar Zonas' en el editor. Las zonas se guardarán automáticamente sin necesidad de copiar/pegar.")
+                    # Área para recibir JSON del componente
+                    zones_json_input = st.text_area(
+                        "JSON de zonas (copia desde el editor cuando guardes):",
+                        value=json.dumps(existing_zones, indent=2),
+                        height=100,
+                        key=f"zones_json_input_{p_sel}",
+                        help="Cuando guardes en el editor, copia el JSON que aparece y pégalo aquí"
+                    )
+                    
+                    # Botón para guardar desde el JSON
+                    if st.button("💾 Guardar Zonas", key=f"save_zones_{p_sel}", type="primary"):
+                        try:
+                            zones_data = json.loads(zones_json_input)
+                            zonas[p_sel] = zones_data
+                            save_zones(zonas)
+                            st.success(f"✅ {len(zones_data)} zonas guardadas correctamente")
+                            st.rerun()
+                        except json.JSONDecodeError:
+                            st.error("❌ Error: El JSON no es válido. Asegúrate de copiar el JSON completo del editor.")
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+                    
+                    st.info("💡 **Instrucciones:** 1) Dibuja zonas en el editor 2) Haz clic en '💾 Guardar Zonas' en el editor 3) Copia el JSON que aparece 4) Pégalo arriba 5) Haz clic en '💾 Guardar Zonas'")
                             
                 except Exception as e:
                     st.error(f"❌ Error en el editor: {str(e)}")
