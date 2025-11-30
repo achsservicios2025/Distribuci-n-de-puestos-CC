@@ -21,12 +21,6 @@ import base64
 # NOTA: ESTE PARCHE ES EL QUE PERMITE QUE PIL IMAGE FUNCIONE EN EL CANVAS
 import streamlit.elements.lib.image_utils
 
-if 'canvas_key' not in st.session_state:
-    st.session_state.canvas_key = 0
-
-# Y en el canvas key:
-key=f"canvas_{p_sel}_{d_sel}_{st.session_state.canvas_key}"
-
 if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
     _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
 
