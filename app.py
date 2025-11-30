@@ -241,8 +241,8 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
         if not day_config.get("subtitle_text"):
             day_config["subtitle_text"] = f"Día: {dia}"
         else:
-             if "Día:" not in str(day_config.get("subtitle_text","")):
-                  day_config["subtitle_text"] = f"Día: {dia}"
+            if "Día:" not in str(day_config.get("subtitle_text","")):
+                day_config["subtitle_text"] = f"Día: {dia}"
 
         img_path = generate_colored_plan(piso_sel, dia, current_seats, "PNG", day_config, global_logo_path)
         
@@ -518,10 +518,10 @@ if menu == "Vista pública":
             
             st.subheader("Distribución completa")
             # MODIFICADO: Fix use_container_width
-            st.dataframe(safe_convert_df(df_view), hide_index=True, width=None, use_container_width=True)
+            st.dataframe(safe_convert_df(df_view), hide_index=True, width='stretch')
             
             st.subheader("Cupos libres por piso y día")
-            st.dataframe(safe_convert_df(lib), hide_index=True, width=None, use_container_width=True)
+            st.dataframe(safe_convert_df(lib), hide_index=True, width='stretch')
         
         with t2:
             st.subheader("Descarga de Planos")
@@ -725,13 +725,13 @@ elif menu == "Reservas":
             
             # TÍTULO CORREGIDO 1
             st.subheader("Reserva de puestos") 
-            st.dataframe(safe_convert_df(clean_reservation_df(list_reservations_df(conn))), hide_index=True, use_container_width=True)
+            st.dataframe(safe_convert_df(clean_reservation_df(list_reservations_df(conn))), hide_index=True,width='stretch')
 
             st.markdown("<br>", unsafe_allow_html=True) 
 
             # TÍTULO CORREGIDO 2
             st.subheader("Reserva de salas") 
-            st.dataframe(safe_convert_df(clean_reservation_df(get_room_reservations_df(conn), "sala")), hide_index=True, use_container_width=True)
+            st.dataframe(safe_convert_df(clean_reservation_df(get_room_reservations_df(conn), "sala")), hide_index=True, width='stretch')
 
 # ==========================================
 # E. ADMINISTRADOR
@@ -752,7 +752,6 @@ elif menu == "Administrador":
                 re = settings.get("admin_email","")
                 if re and em_chk.lower()==re.lower():
                     t = generate_token()
-                    # Ya no usamos ensure_reset_table porque la DB está lista
                     save_reset_token(conn, t, (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=1)).isoformat())
                     send_reservation_email(re, "Token", f"Token: {t}"); st.success("Enviado.")
                 else: st.error("Email no coincide.")
@@ -763,7 +762,7 @@ elif menu == "Administrador":
                 else: st.error(m)
         st.stop()
 
-    # DEFINICIÓN DE PESTAÑAS - DEBE ESTAR INMEDIATAMENTE DESPUÉS DEL st.stop() Y ANTES DE CUALQUIER OTRO CÓDIGO
+    # ¡IMPORTANTE! Las pestañas deben definirse INMEDIATAMENTE después del st.stop()
     t1, t2, t3, t4, t5, t6 = st.tabs(["Excel", "Editor Visual", "Informes", "Config", "Apariencia", "Mantenimiento"])
 
     if st.button("Cerrar Sesión"): st.session_state["is_admin"]=False; st.rerun()
@@ -843,7 +842,7 @@ elif menu == "Administrador":
                 if not df_preview.empty:
                     # CAMBIO: Mostrar tabla completa ocupando todo el ancho
                     df_sorted = apply_sorting_to_df(df_preview)
-                    st.dataframe(df_sorted, hide_index=True, width=None, use_container_width=True)
+                    st.dataframe(df_sorted, hide_index=True, width='stretch')
                 else:
                     st.warning("No se generaron asignaciones.")
             
@@ -858,10 +857,10 @@ elif menu == "Administrador":
                     
                     c1, c2 = st.columns(2)
                     c1.markdown("**Detalle de Conflictos:**")
-                    c1.dataframe(def_df, use_container_width=True)
+                    c1.dataframe(def_df, width='stretch')
                     
                     c2.markdown("**⚠️ Equipos más afectados (Repetición):**")
-                    c2.dataframe(conteo_injusticia, use_container_width=True)
+                    c2.dataframe(conteo_injusticia,width='stretch')
                     
                     if conteo_injusticia['Veces Perjudicado'].max() > 1:
                         c2.error("Hay equipos sufriendo déficit múltiples días. Se recomienda usar 'Auto-Optimizar'.")
@@ -986,7 +985,6 @@ with t2:
             img = PILImage.open(pim)
             
             # Redimensionar la imagen para que no sea tan grande
-            # Tamaño máximo para el canvas
             max_width = 700
             original_width, original_height = img.size
             
@@ -1008,25 +1006,25 @@ with t2:
             st.markdown("---")
             st.subheader("Editor de Zonas - Dibuja rectángulos sobre el plano")
             
-            # Canvas con la imagen como fondo - usando base64
+            # CORRECCIÓN: Usar el objeto PIL Image redimensionado directamente
+            # Convertir la imagen redimensionada a base64 para el canvas
             import base64
             from io import BytesIO
             
-            # Convertir imagen a base64 para el canvas
             buffered = BytesIO()
             img_resized.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             img_data = f"data:image/png;base64,{img_str}"
 
-            # Canvas con background_image
+            # Canvas con background_image usando base64
             canvas_result = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=2,
                 stroke_color="#00A04A",
-                background_image=img_data,  # Imagen en base64
+                background_image=img_data,  # Usar la string base64 aquí
                 update_streamlit=True,
-                width=display_width,
-                height=display_height,
+                width=display_width,        # Usar las dimensiones de img_resized
+                height=display_height,      # Usar las dimensiones de img_resized
                 drawing_mode="rect",
                 key=f"canvas_{p_sel}_{d_sel}",
             )
@@ -1075,7 +1073,6 @@ with t2:
     else:
         st.warning(f"No se encontró el plano: {pim}")
 
-    # ... el resto del código del editor visual se mantiene igual ...
     # ... el resto del código del editor visual se mantiene igual ...
         # Listado y eliminación de zonas guardadas
         if p_sel in zonas:
@@ -1188,7 +1185,7 @@ with t2:
                 'deficit': 'Cupos Faltantes',
                 'causa': 'Observación'
             })
-            st.dataframe(df_deficit, hide_index=True, width=None, use_container_width=True)
+            st.dataframe(df_deficit, hide_index=True, width='stretch')
             st.markdown("---")
 
         rf = st.selectbox("Formato Reporte", ["Excel", "PDF"], key="formato_reporte")
