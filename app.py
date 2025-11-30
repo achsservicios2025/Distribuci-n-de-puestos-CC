@@ -722,6 +722,7 @@ elif menu == "Administrador":
                 re = settings.get("admin_email","")
                 if re and em_chk.lower()==re.lower():
                     t = generate_token()
+                    # Ya no usamos ensure_reset_table porque la DB está lista
                     save_reset_token(conn, t, (datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=1)).isoformat())
                     send_reservation_email(re, "Token", f"Token: {t}"); st.success("Enviado.")
                 else: st.error("Email no coincide.")
@@ -732,15 +733,11 @@ elif menu == "Administrador":
                 else: st.error(m)
         st.stop()
 
-    # MUEVE ESTA LÍNEA AQUÍ (después del st.stop())
+    # DEFINICIÓN DE PESTAÑAS - DEBE ESTAR INMEDIATAMENTE DESPUÉS DEL st.stop() Y ANTES DE CUALQUIER OTRO CÓDIGO
     t1, t2, t3, t4, t5, t6 = st.tabs(["Excel", "Editor Visual", "Informes", "Config", "Apariencia", "Mantenimiento"])
 
     if st.button("Cerrar Sesión"): st.session_state["is_admin"]=False; st.rerun()
 
-    # El resto del código se mantiene igual...
-
-    t1, t2, t3, t4, t5, t6 = st.tabs(["Excel", "Editor Visual", "Informes", "Config", "Apariencia", "Mantenimiento"])
-    
     # -----------------------------------------------------------
     # T1: GENERADOR DE DISTRIBUCIÓN (CON AUTO-OPTIMIZACIÓN JUSTA)
     # -----------------------------------------------------------
@@ -929,166 +926,197 @@ elif menu == "Administrador":
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
-# -----------------------------------------------------------
-    # T2: EDITOR VISUAL (CORREGIDO Y BLINDADO)
     # -----------------------------------------------------------
-with t2:
-    st.info("Editor de Zonas")
-    zonas = load_zones()
-    c1, c2 = st.columns(2)
-    
-    # MODIFICADO: Leer con funcion importada
-    df_d = read_distribution_df(conn)
-    pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
-    
-    p_sel = c1.selectbox("Piso", pisos_list); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
-    p_num = p_sel.replace("Piso ", "").strip()
-    
-    # 1. Búsqueda de Archivo
-    file_base = f"piso{p_num}" 
-    pim = PLANOS_DIR / f"{file_base}.png"
-    if not pim.exists(): 
-        pim = PLANOS_DIR / f"{file_base}.jpg"
-    if not pim.exists(): 
-        pim = PLANOS_DIR / f"Piso{p_num}.png"
+    # T2: EDITOR VISUAL
+    # -----------------------------------------------------------
+    with t2:
+        st.info("Editor de Zonas")
+        zonas = load_zones()
+        c1, c2 = st.columns(2)
         
-    if pim.exists():
-        # CORRECCIÓN: Cargar y redimensionar la imagen correctamente
-        try:
-            img = PILImage.open(pim)
+        # MODIFICADO: Leer con funcion importada
+        df_d = read_distribution_df(conn)
+        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+        
+        p_sel = c1.selectbox("Piso", pisos_list, key="editor_piso"); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
+        p_num = p_sel.replace("Piso ", "").strip()
+        
+        # 1. Búsqueda de Archivo
+        file_base = f"piso{p_num}" 
+        pim = PLANOS_DIR / f"{file_base}.png"
+        if not pim.exists(): 
+            pim = PLANOS_DIR / f"{file_base}.jpg"
+        if not pim.exists(): 
+            pim = PLANOS_DIR / f"Piso{p_num}.png"
             
-            # Calcular dimensiones
-            cw = 800
-            w, h = img.size
-            if w > cw:
-                ratio = cw / w
-                ch = int(h * ratio)
-                img_resized = img.resize((cw, ch), PILImage.Resampling.LANCZOS)
-            else:
-                ch = h
-                cw = w
-                img_resized = img
+        if pim.exists():
+            # CORRECCIÓN: Cargar y redimensionar la imagen correctamente
+            try:
+                img = PILImage.open(pim)
+                
+                # Cálculo de dimensiones
+                cw = 800
+                w, h = img.size
+                if w > cw:
+                    ratio = cw / w
+                    ch = int(h * ratio)
+                    img_resized = img.resize((cw, ch), PILImage.Resampling.LANCZOS)
+                else:
+                    ch = h
+                    cw = w
+                    img_resized = img
 
-            # CORRECCIÓN: Pasar el objeto PIL Image directamente
-            canvas = st_canvas(
-                fill_color="rgba(0, 160, 74, 0.3)",
-                stroke_width=2,
-                stroke_color="#00A04A",
-                background_image=img_resized,  # ← OBJETO PIL, NO STRING
-                update_streamlit=True,
-                width=cw,
-                height=ch,
-                drawing_mode="rect",
-                key=f"cv_{p_sel}"
-            )
-        except Exception as e:
-            st.error(f"Error al cargar la imagen: {str(e)}")
-            canvas = None
-    
-    # EL RESTO DEL CÓDIGO ORIGINAL SE MANTIENE INTACTO...
-    # [Todo el código existente de personalización, leyenda, etc.]    else:
-        st.warning(f"No se encontró el plano: {pim}")
+                # CORRECCIÓN: Pasar el objeto PIL Image directamente
+                canvas = st_canvas(
+                    fill_color="rgba(0, 160, 74, 0.3)",
+                    stroke_width=2,
+                    stroke_color="#00A04A",
+                    background_image=img_resized,  # ← OBJETO PIL, NO STRING
+                    update_streamlit=True,
+                    width=cw,
+                    height=ch,
+                    drawing_mode="rect",
+                    key=f"cv_{p_sel}"
+                )
+            
+                current_seats_dict = {}
+                eqs = [""]
+                if not df_d.empty:
+                    subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+                    current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
+                    eqs += sorted(subset['equipo'].unique().tolist())
+                
+                salas_piso = []
+                if "1" in p_sel: salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
+                elif "2" in p_sel: salas_piso = ["Sala Reuniones - Piso 2"]
+                elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
+                eqs = eqs + salas_piso
 
-    # Listado y eliminación de zonas guardadas
-    if p_sel in zonas:
-        st.subheader("Zonas Guardadas")
-        for i, z in enumerate(zonas[p_sel]):
-            c1, c2 = st.columns([4, 1])
-            c1.markdown(
-                f"<span style='color:{z['color']}'>■</span> {z['team']}",
-                unsafe_allow_html=True
-            )
-            if c2.button("Eliminar", key=f"d{i}"):
-                zonas[p_sel].pop(i)
-                save_zones(zonas)
-                st.rerun()
+                # Selección e info
+                c1, c2, c3 = st.columns([2, 1, 1])
+                tn = c1.selectbox("Equipo / Sala", eqs, key="editor_equipo")
+                tc = c2.color_picker("Color", "#00A04A", key="editor_color")
 
-    st.divider()
-    st.subheader("Personalización Título y Leyenda")
-    with st.expander("🎨 Editar Estilos", expanded=True):
-        tm = st.text_input("Título Principal", f"Distribución {p_sel}")
-        ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}")
-        
-        align_options = ["Izquierda", "Centro", "Derecha"]
+                if tn and tn in current_seats_dict:
+                    st.info(f"Cupos: {current_seats_dict[tn]}")
 
-        st.markdown("##### Estilos del Título Principal")
-        cf1, cf2, cf3 = st.columns(3)
-        ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_t")
-        fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key="size_t")
-        align = cf3.selectbox("Alineación (Título)", align_options, index=1)
-
-        st.markdown("---")
-        st.markdown("##### Estilos del Subtítulo")
-        cs1, cs2, cs3 = st.columns(3)
-        ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_s")
-        fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key="size_s")
-        align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1)
-
-        st.markdown("---")
-        st.markdown("##### Estilos de la Leyenda")
-        cl1, cl2, cl3 = st.columns(3)
-        ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_l", index=0)
-        fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key="size_l")
-        align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0)
-        
-        st.markdown("---")
-        cg1, cg2, cg3, cg4 = st.columns(4) 
-        lg = cg1.checkbox("Logo", True, key="chk_logo")
-        ln = cg2.checkbox("Mostrar Leyenda", True, key="chk_legend")
-        align_logo = cg3.selectbox("Alineación Logo", align_options, index=0)
-        lw = cg4.slider("Ancho Logo", 50, 300, 150)
-        
-        cc1, cc2 = st.columns(2)
-        bg = cc1.color_picker("Fondo Header", "#FFFFFF")
-        tx = cc2.color_picker("Color Texto", "#000000")
-
-    fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"])
-    f_code = "PNG" if "PNG" in fmt_sel else "PDF"
-    
-    if st.button("🎨 Actualizar Vista Previa"):
-        conf = {
-            "title_text": tm,
-            "subtitle_text": ts,
-            "title_font": ff_t,
-            "title_size": fs_t,
-            "subtitle_font": ff_s,
-            "subtitle_size": fs_s,
-            "legend_font": ff_l,
-            "legend_size": fs_l,
-            "alignment": align, 
-            "subtitle_align": align_s, 
-            "legend_align": align_l, 
-            "bg_color": bg, 
-            "title_color": tx, 
-            "subtitle_color": "#666666", 
-            "use_logo": lg, 
-            "use_legend": ln, 
-            "logo_width": lw,
-            "logo_align": align_logo
-        }
-        # Guardar config en session_state para usarla en dossier PDF
-        st.session_state['last_style_config'] = conf
-        
-        out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
-        if out: 
-            st.success("Vista previa generada correctamente")
+                # Guardar última figura dibujada en el canvas
+                if c3.button("Guardar", key="sz"):
+                    if tn and canvas.json_data and canvas.json_data.get("objects"):
+                        o = canvas.json_data["objects"][-1]
+                        zonas.setdefault(p_sel, []).append({
+                            "team": tn,
+                            "x": int(o.get("left", 0)),
+                            "y": int(o.get("top", 0)),
+                            "w": int(o.get("width", 0) * o.get("scaleX", 1)),
+                            "h": int(o.get("height", 0) * o.get("scaleY", 1)),
+                            "color": tc
+                        })
+                        save_zones(zonas)
+                        st.success("OK")
+                    else:
+                        st.warning("No hay figura dibujada o no seleccionaste equipo.")
+            except Exception as e:
+                st.error(f"Error al cargar la imagen: {str(e)}")
         else:
-            st.error("Error al generar la vista previa")
-    
-    ds = d_sel.lower().replace("é","e").replace("á","a")
-    fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
-    fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
-    
-    if fpng.exists(): 
-        st.image(str(fpng), width=550, caption="Vista Previa")
-    elif fpdf.exists(): 
-        st.info("PDF generado (sin vista previa)")
-    
-    tf = fpng if "PNG" in fmt_sel else fpdf
-    mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
-    if tf.exists():
-        with open(tf,"rb") as f: 
-            st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True)
+            st.warning(f"No se encontró el plano: {pim}")
+
+        # Listado y eliminación de zonas guardadas
+        if p_sel in zonas:
+            for i, z in enumerate(zonas[p_sel]):
+                c1, c2 = st.columns([4, 1])
+                c1.markdown(
+                    f"<span style='color:{z['color']}'>■</span> {z['team']}",
+                    unsafe_allow_html=True
+                )
+                if c2.button("X", key=f"d{i}"):
+                    zonas[p_sel].pop(i)
+                    save_zones(zonas)
+                    st.rerun()
+
+        st.divider()
+        st.subheader("Personalización Título y Leyenda")
+        with st.expander("🎨 Editar Estilos", expanded=True):
+            tm = st.text_input("Título Principal", f"Distribución {p_sel}", key="titulo_principal")
+            ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}", key="subtitulo")
+            
+            align_options = ["Izquierda", "Centro", "Derecha"]
+
+            st.markdown("##### Estilos del Título Principal")
+            cf1, cf2, cf3 = st.columns(3)
+            ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_t")
+            fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key="size_t")
+            align = cf3.selectbox("Alineación (Título)", align_options, index=1, key="align_t")
+
+            st.markdown("---")
+            st.markdown("##### Estilos del Subtítulo")
+            cs1, cs2, cs3 = st.columns(3)
+            ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_s")
+            fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key="size_s")
+            align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1, key="align_s")
+
+            st.markdown("---")
+            st.markdown("##### Estilos de la Leyenda")
+            cl1, cl2, cl3 = st.columns(3)
+            ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_l", index=0)
+            fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key="size_l")
+            align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0, key="align_l")
+            
+            st.markdown("---")
+            cg1, cg2, cg3, cg4 = st.columns(4) 
+            lg = cg1.checkbox("Logo", True, key="chk_logo"); 
+            ln = cg2.checkbox("Mostrar Leyenda", True, key="chk_legend");
+            align_logo = cg3.selectbox("Alineación Logo", align_options, index=0, key="align_logo")
+            lw = cg4.slider("Ancho Logo", 50, 300, 150, key="logo_width")
+            
+            cc1, cc2 = st.columns(2)
+            bg = cc1.color_picker("Fondo Header", "#FFFFFF", key="bg_color"); tx = cc2.color_picker("Color Texto", "#000000", key="text_color")
+
+        fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"], key="formato_salida")
+        f_code = "PNG" if "PNG" in fmt_sel else "PDF"
+        
+        if st.button("🎨 Actualizar Vista Previa", key="actualizar_vista"):
+            conf = {
+                "title_text": tm,
+                "subtitle_text": ts,
+                "title_font": ff_t,
+                "title_size": fs_t,
+                "subtitle_font": ff_s,
+                "subtitle_size": fs_s,
+                "legend_font": ff_l,
+                "legend_size": fs_l,
+                "alignment": align, 
+                "subtitle_align": align_s, 
+                "legend_align": align_l, 
+                "bg_color": bg, 
+                "title_color": tx, 
+                "subtitle_color": "#666666", 
+                "use_logo": lg, 
+                "use_legend": ln, 
+                "logo_width": lw,
+                "logo_align": align_logo
+            }
+            # CAMBIO: Guardar config en session_state para usarla en dossier PDF
+            st.session_state['last_style_config'] = conf
+            
+            out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
+            if out: st.success("Generado.")
+        
+        ds = d_sel.lower().replace("é","e").replace("á","a")
+        fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+        fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
+        
+        if fpng.exists(): st.image(str(fpng), width=550, caption="Vista Previa")
+        elif fpdf.exists(): st.info("PDF generado (sin vista previa)")
+        
+        tf = fpng if "PNG" in fmt_sel else fpdf
+        mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
+        if tf.exists():
+            with open(tf,"rb") as f: st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True, key=f"dl_{fmt_sel}")
+
+    # -----------------------------------------------------------
+    # T3: INFORMES
+    # -----------------------------------------------------------
     with t3:
         st.subheader("Generar Reportes de Distribución")
         
@@ -1107,8 +1135,8 @@ with t2:
             st.dataframe(df_deficit, hide_index=True, width=None, use_container_width=True)
             st.markdown("---")
 
-        rf = st.selectbox("Formato Reporte", ["Excel", "PDF"])
-        if st.button("Generar Reporte"):
+        rf = st.selectbox("Formato Reporte", ["Excel", "PDF"], key="formato_reporte")
+        if st.button("Generar Reporte", key="generar_reporte"):
             df_raw = read_distribution_df(conn); df_raw = apply_sorting_to_df(df_raw)
             if "Excel" in rf:
                 b = BytesIO()
@@ -1120,17 +1148,17 @@ with t2:
                 st.session_state['rd'] = generate_full_pdf(df, df, logo_path=Path(global_logo_path), deficit_data=d_data)
                 st.session_state['rn'] = "reporte_distribucion.pdf"; st.session_state['rm'] = "application/pdf"
             st.success("OK")
-        if 'rd' in st.session_state: st.download_button("Descargar", st.session_state['rd'], st.session_state['rn'], mime=st.session_state['rm'])
+        if 'rd' in st.session_state: st.download_button("Descargar", st.session_state['rd'], st.session_state['rn'], mime=st.session_state['rm'], key="descargar_reporte")
         
         st.markdown("---")
         cp, cd = st.columns(2)
         pi = cp.selectbox("Piso", pisos_list, key="pi2"); di = cd.selectbox("Día", ["Todos"]+ORDER_DIAS, key="di2")
         if di=="Todos":
-            if st.button("Generar Dossier"):
+            if st.button("Generar Dossier", key="generar_dossier"):
                 # CAMBIO: Pasar conn y logo para regenerar
                 m = create_merged_pdf(pi, conn, global_logo_path)
                 if m: st.session_state['dos'] = m; st.success("OK")
-            if 'dos' in st.session_state: st.download_button("Descargar Dossier", st.session_state['dos'], "S.pdf", "application/pdf")
+            if 'dos' in st.session_state: st.download_button("Descargar Dossier", st.session_state['dos'], "S.pdf", "application/pdf", key="descargar_dossier")
         else:
             ds = di.lower().replace("é","e").replace("á","a")
             fp = COLORED_DIR / f"piso_{pi.split()[-1]}_{ds}_combined.png"
@@ -1143,15 +1171,27 @@ with t2:
                 sf = st.selectbox("Fmt", ops, key="sf2")
                 tf = fp if "PNG" in sf else fd
                 mm = "image/png" if "PNG" in sf else "application/pdf"
-                with open(tf,"rb") as f: st.download_button("Descargar", f, tf.name, mm)
+                with open(tf,"rb") as f: st.download_button("Descargar", f, tf.name, mm, key="descargar_plano")
             else: st.warning("No existe.")
 
+    # -----------------------------------------------------------
+    # T4: CONFIG
+    # -----------------------------------------------------------
     with t4:
-        nu = st.text_input("User"); np = st.text_input("Pass", type="password"); ne = st.text_input("Email")
+        nu = st.text_input("User", key="admin_user"); np = st.text_input("Pass", type="password", key="admin_pass"); ne = st.text_input("Email", key="admin_email")
         if st.button("Guardar", key="sc"): save_setting(conn, "admin_user", nu); save_setting(conn, "admin_pass", np); save_setting(conn, "admin_email", ne); st.success("OK")
 
+    # -----------------------------------------------------------
+    # T5: APARIENCIA
+    # -----------------------------------------------------------
     with t5: admin_appearance_ui(conn)
     
+    # -----------------------------------------------------------
+    # T6: MANTENIMIENTO
+    # -----------------------------------------------------------
     with t6:
-        opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
-        if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+        opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"], key="opcion_borrar")
+        # SOLO UN BOTÓN - ELIMINA LA LÍNEA DUPLICADA
+        if st.button("BORRAR", type="primary", key="borrar_mantenimiento"): 
+            msg = perform_granular_delete(conn, opt); 
+            st.success(msg)
