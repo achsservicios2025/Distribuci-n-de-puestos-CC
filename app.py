@@ -19,21 +19,21 @@ import base64
 # 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
 # ---------------------------------------------------------
 # NOTA: ESTE PARCHE ES EL QUE PERMITE QUE PIL IMAGE FUNCIONE EN EL CANVAS
-import streamlit.elements.lib.image_utils
+#import streamlit.elements.lib.image_utils
 
-if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
-    _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
+#if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
+#    _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
 
-    @dataclass
-    class WidthConfig:
-        width: int
+#    @dataclass
+#    class WidthConfig:
+#        width: int
 
-    def _patched_image_to_url(image_data, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None):
-        if isinstance(width, int):
-            width = WidthConfig(width=width)
-        return _orig_image_to_url(image_data, width, clamp, channels, output_format, image_id)
-
-    streamlit.elements.lib.image_utils.image_to_url = _patched_image_to_url
+#    def _patched_image_to_url(image_data, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None):
+#        if isinstance(width, int):
+#            width = WidthConfig(width=width)
+#        return _orig_image_to_url(image_data, width, clamp, channels, output_format, image_id)
+#
+#    streamlit.elements.lib.image_utils.image_to_url = _patched_image_to_url
 
 # ---------------------------------------------------------
 # 2. IMPORTACIONES DE MÓDULOS
@@ -144,6 +144,20 @@ def apply_sorting_to_df(df):
         df = df.sort_values(sort_cols)
         
     return df
+
+def safe_convert_df(df):
+    """Convierte seguramente un DataFrame para evitar errores de serialización"""
+    if df.empty:
+        return df
+        
+    df_clean = df.copy()
+    for col in df_clean.columns:
+        # Convertir columnas de objeto a string
+        if df_clean[col].dtype == 'object':
+            df_clean[col] = df_clean[col].astype(str)
+        # Manejar valores NaN
+        df_clean[col] = df_clean[col].fillna('')
+    return df_clean
 
 # --- NUEVA FUNCIÓN CON ESTRATEGIAS DE ORDENAMIENTO ---
 def get_distribution_proposal(df_equipos, df_parametros, strategy="random"):
@@ -488,10 +502,10 @@ if menu == "Vista pública":
             
             st.subheader("Distribución completa")
             # MODIFICADO: Fix use_container_width
-            st.dataframe(df_view, hide_index=True, width=None, use_container_width=True)
+            st.dataframe(safe_convert_df(df_view), hide_index=True, width=None, use_container_width=True)
             
             st.subheader("Cupos libres por piso y día")
-            st.dataframe(lib, hide_index=True, width=None, use_container_width=True)
+            st.dataframe(safe_convert_df(lib), hide_index=True, width=None, use_container_width=True)
         
         with t2:
             st.subheader("Descarga de Planos")
@@ -575,8 +589,8 @@ elif menu == "Reservas":
                     ocupados = 0
                     if not all_res.empty:
                         mask = (all_res["reservation_date"].astype(str) == str(fe)) & \
-                               (all_res["piso"] == pi) & \
-                               (all_res["team_area"] == "Cupos libres")
+                                (all_res["piso"] == pi) & \
+                                (all_res["team_area"] == "Cupos libres")
                         ocupados = len(all_res[mask])
                     
                     disponibles = total_cupos - ocupados
@@ -695,13 +709,13 @@ elif menu == "Reservas":
             
             # TÍTULO CORREGIDO 1
             st.subheader("Reserva de puestos") 
-            st.dataframe(clean_reservation_df(list_reservations_df(conn)), hide_index=True, use_container_width=True)
+            st.dataframe(safe_convert_df(clean_reservation_df(list_reservations_df(conn))), hide_index=True, use_container_width=True)
 
             st.markdown("<br>", unsafe_allow_html=True) 
 
             # TÍTULO CORREGIDO 2
             st.subheader("Reserva de salas") 
-            st.dataframe(clean_reservation_df(get_room_reservations_df(conn), "sala"), hide_index=True, use_container_width=True)
+            st.dataframe(safe_convert_df(clean_reservation_df(get_room_reservations_df(conn), "sala")), hide_index=True, use_container_width=True)
 
 # ==========================================
 # E. ADMINISTRADOR
@@ -930,97 +944,102 @@ elif menu == "Administrador":
     # T2: EDITOR VISUAL
     # -----------------------------------------------------------
     with t2:
-        st.info("Editor de Zonas")
-        zonas = load_zones()
-        c1, c2 = st.columns(2)
+    st.info("Editor de Zonas")
+    zonas = load_zones()
+    c1, c2 = st.columns(2)
+    
+    # MODIFICADO: Leer con funcion importada
+    df_d = read_distribution_df(conn)
+    pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+    
+    p_sel = c1.selectbox("Piso", pisos_list, key="editor_piso")
+    d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
+    p_num = p_sel.replace("Piso ", "").strip()
+    
+    # 1. Búsqueda de Archivo
+    file_base = f"piso{p_num}" 
+    pim = PLANOS_DIR / f"{file_base}.png"
+    if not pim.exists(): 
+        pim = PLANOS_DIR / f"{file_base}.jpg"
+    if not pim.exists(): 
+        pim = PLANOS_DIR / f"Piso{p_num}.png"
         
-        # MODIFICADO: Leer con funcion importada
-        df_d = read_distribution_df(conn)
-        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
-        
-        p_sel = c1.selectbox("Piso", pisos_list, key="editor_piso"); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
-        p_num = p_sel.replace("Piso ", "").strip()
-        
-        # 1. Búsqueda de Archivo
-        file_base = f"piso{p_num}" 
-        pim = PLANOS_DIR / f"{file_base}.png"
-        if not pim.exists(): 
-            pim = PLANOS_DIR / f"{file_base}.jpg"
-        if not pim.exists(): 
-            pim = PLANOS_DIR / f"Piso{p_num}.png"
+    if pim.exists():
+        try:
+            # Cargar imagen
+            img = PILImage.open(pim)
             
-        if pim.exists():
-            # CORRECCIÓN: Cargar y redimensionar la imagen correctamente
-            try:
-                img = PILImage.open(pim)
-                
-                # Cálculo de dimensiones
-                cw = 800
-                w, h = img.size
-                if w > cw:
-                    ratio = cw / w
-                    ch = int(h * ratio)
-                    img_resized = img.resize((cw, ch), PILImage.Resampling.LANCZOS)
+            # Mostrar imagen estática primero para verificar que carga
+            st.image(img, caption=f"Plano de {p_sel}", use_column_width=True)
+            
+            # Calcular dimensiones para el canvas
+            cw = 800
+            w, h = img.size
+            if w > cw:
+                ratio = cw / w
+                ch = int(h * ratio)
+            else:
+                ch = h
+                cw = w
+
+            # Canvas simplificado - sin background_image problemático
+            canvas_result = st_canvas(
+                fill_color="rgba(0, 160, 74, 0.3)",
+                stroke_width=2,
+                stroke_color="#00A04A",
+                background_color="#FFFFFF",
+                update_streamlit=True,
+                width=cw,
+                height=ch,
+                drawing_mode="rect",
+                key=f"canvas_{p_sel}_{d_sel}",
+            )
+            
+            # El resto del código para procesar las zonas...
+            current_seats_dict = {}
+            eqs = [""]
+            if not df_d.empty:
+                subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+                current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
+                eqs += sorted(subset['equipo'].unique().tolist())
+            
+            salas_piso = []
+            if "1" in p_sel: salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
+            elif "2" in p_sel: salas_piso = ["Sala Reuniones - Piso 2"]
+            elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
+            eqs = eqs + salas_piso
+
+            # Selección e info
+            c1, c2, c3 = st.columns([2, 1, 1])
+            tn = c1.selectbox("Equipo / Sala", eqs, key="editor_equipo")
+            tc = c2.color_picker("Color", "#00A04A", key="editor_color")
+
+            if tn and tn in current_seats_dict:
+                st.info(f"Cupos: {current_seats_dict[tn]}")
+
+            # Guardar última figura dibujada en el canvas
+            if c3.button("Guardar Zona", key="guardar_zona"):
+                if tn and canvas_result.json_data and canvas_result.json_data.get("objects"):
+                    o = canvas_result.json_data["objects"][-1]
+                    zonas.setdefault(p_sel, []).append({
+                        "team": tn,
+                        "x": int(o.get("left", 0)),
+                        "y": int(o.get("top", 0)),
+                        "w": int(o.get("width", 0) * o.get("scaleX", 1)),
+                        "h": int(o.get("height", 0) * o.get("scaleY", 1)),
+                        "color": tc
+                    })
+                    save_zones(zonas)
+                    st.success("✅ Zona guardada correctamente")
                 else:
-                    ch = h
-                    cw = w
-                    img_resized = img
+                    st.warning("No hay figura dibujada o no seleccionaste equipo.")
+                    
+        except Exception as e:
+            st.error(f"Error al cargar el plano: {str(e)}")
+    else:
+        st.warning(f"No se encontró el plano: {pim}")
 
-                # CORRECCIÓN: Pasar el objeto PIL Image directamente
-                canvas = st_canvas(
-                    fill_color="rgba(0, 160, 74, 0.3)",
-                    stroke_width=2,
-                    stroke_color="#00A04A",
-                    background_image=img_resized,  # ← OBJETO PIL, NO STRING
-                    update_streamlit=True,
-                    width=cw,
-                    height=ch,
-                    drawing_mode="rect",
-                    key=f"cv_{p_sel}"
-                )
-            
-                current_seats_dict = {}
-                eqs = [""]
-                if not df_d.empty:
-                    subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-                    current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                    eqs += sorted(subset['equipo'].unique().tolist())
-                
-                salas_piso = []
-                if "1" in p_sel: salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
-                elif "2" in p_sel: salas_piso = ["Sala Reuniones - Piso 2"]
-                elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
-                eqs = eqs + salas_piso
-
-                # Selección e info
-                c1, c2, c3 = st.columns([2, 1, 1])
-                tn = c1.selectbox("Equipo / Sala", eqs, key="editor_equipo")
-                tc = c2.color_picker("Color", "#00A04A", key="editor_color")
-
-                if tn and tn in current_seats_dict:
-                    st.info(f"Cupos: {current_seats_dict[tn]}")
-
-                # Guardar última figura dibujada en el canvas
-                if c3.button("Guardar", key="sz"):
-                    if tn and canvas.json_data and canvas.json_data.get("objects"):
-                        o = canvas.json_data["objects"][-1]
-                        zonas.setdefault(p_sel, []).append({
-                            "team": tn,
-                            "x": int(o.get("left", 0)),
-                            "y": int(o.get("top", 0)),
-                            "w": int(o.get("width", 0) * o.get("scaleX", 1)),
-                            "h": int(o.get("height", 0) * o.get("scaleY", 1)),
-                            "color": tc
-                        })
-                        save_zones(zonas)
-                        st.success("OK")
-                    else:
-                        st.warning("No hay figura dibujada o no seleccionaste equipo.")
-            except Exception as e:
-                st.error(f"Error al cargar la imagen: {str(e)}")
-        else:
-            st.warning(f"No se encontró el plano: {pim}")
-
+    # ... el resto del código del editor visual se mantiene igual ...
         # Listado y eliminación de zonas guardadas
         if p_sel in zonas:
             for i, z in enumerate(zonas[p_sel]):
