@@ -580,18 +580,26 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
                 function saveZones() {{
                     // Guardar automáticamente - enviar directamente a Streamlit
                     const zonesData = rectangles;
+                    const zonesJson = JSON.stringify(zonesData);
                     
                     // Enviar a Streamlit usando postMessage
                     if (window.parent) {{
+                        // Enviar mensaje al padre
                         window.parent.postMessage({{
                             type: 'zones_saved',
                             piso: '{p_sel}',
-                            zones: zonesData
+                            zones: zonesData,
+                            zones_json: zonesJson
                         }}, '*');
+                        
+                        // También guardar en localStorage como respaldo
+                        localStorage.setItem('zones_save_{p_sel}', zonesJson);
                         
                         alert('✅ Zonas guardadas automáticamente! (' + rectangles.length + ' zonas)\\n\\nLa página se actualizará en un momento.');
                     }} else {{
-                        alert('✅ Zonas listas para guardar! (' + rectangles.length + ' zonas)');
+                        // Fallback: guardar en localStorage
+                        localStorage.setItem('zones_save_{p_sel}', zonesJson);
+                        alert('✅ Zonas guardadas! (' + rectangles.length + ' zonas)');
                     }}
                 }}
                 
@@ -1477,53 +1485,128 @@ elif menu == "Administrador":
                         label_visibility="collapsed"
                     )
                     
+                    # Campo oculto para recibir datos del componente (completamente invisible)
+                    zones_json_hidden = st.text_input(
+                        "",
+                        value=json.dumps(existing_zones),
+                        key=f"zones_json_hidden_{p_sel}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    # Procesar guardado automático cuando cambia el campo oculto
+                    try:
+                        zones_data = json.loads(zones_json_hidden)
+                        # Comparar con las zonas existentes
+                        existing_json = json.dumps(existing_zones, sort_keys=True)
+                        new_json = json.dumps(zones_data, sort_keys=True)
+                        
+                        if new_json != existing_json:
+                            # Guardar inmediatamente
+                            zonas[p_sel] = zones_data
+                            save_zones(zonas)
+                            st.success(f"✅ {len(zones_data)} zonas guardadas automáticamente!")
+                            st.rerun()
+                    except json.JSONDecodeError:
+                        pass  # Ignorar si el JSON no es válido aún
+                    except Exception as e:
+                        pass  # Ignorar errores silenciosamente
+                    
                     # Script para detectar cuando se guarda desde el componente y guardar automáticamente
                     auto_save_script = f"""
                     <script>
-                    // Escuchar mensajes del componente HTML
-                    window.addEventListener('message', function(event) {{
-                        if (event.data && event.data.type === 'zones_saved' && event.data.piso === '{p_sel}') {{
-                            // Actualizar el campo oculto con los datos
-                            const hiddenInput = document.querySelector('input[data-testid*="zones_json_hidden_{p_sel}"]');
-                            if (hiddenInput) {{
-                                hiddenInput.value = JSON.stringify(event.data.zones);
-                                hiddenInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                                hiddenInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    (function() {{
+                        // Escuchar mensajes del componente HTML
+                        window.addEventListener('message', function(event) {{
+                            if (event.data && event.data.type === 'zones_saved' && event.data.piso === '{p_sel}') {{
+                                console.log('Mensaje recibido, actualizando campo:', event.data.zones.length, 'zonas');
                                 
-                                // Recargar la página para que Streamlit procese
-                                setTimeout(() => {{
-                                    window.location.reload();
-                                }}, 500);
+                                // Buscar el campo oculto de diferentes formas
+                                let hiddenInput = null;
+                                
+                                // Intentar múltiples selectores
+                                const selectors = [
+                                    'input[data-testid*="zones_json_hidden_{p_sel}"]',
+                                    'input[key*="zones_json_hidden_{p_sel}"]',
+                                    'input[aria-label*="zones"]',
+                                    'input[type="text"]'
+                                ];
+                                
+                                for (let selector of selectors) {{
+                                    hiddenInput = document.querySelector(selector);
+                                    if (hiddenInput) break;
+                                }}
+                                
+                                if (hiddenInput && event.data.zones_json) {{
+                                    console.log('Campo encontrado, actualizando...');
+                                    hiddenInput.value = event.data.zones_json;
+                                    
+                                    // Disparar eventos para que Streamlit detecte el cambio
+                                    hiddenInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    hiddenInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    hiddenInput.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                                    
+                                    // También guardar en localStorage como respaldo
+                                    localStorage.setItem('zones_save_{p_sel}', event.data.zones_json);
+                                    
+                                    console.log('Campo actualizado, recargando en 500ms...');
+                                    
+                                    // Recargar después de un breve delay para que Streamlit procese
+                                    setTimeout(() => {{
+                                        window.location.reload();
+                                    }}, 500);
+                                }} else {{
+                                    console.error('No se encontró el campo oculto. Guardando en localStorage como respaldo.');
+                                    localStorage.setItem('zones_save_{p_sel}', event.data.zones_json);
+                                    setTimeout(() => {{
+                                        window.location.reload();
+                                    }}, 500);
+                                }}
+                            }}
+                        }}, false);
+                        
+                        // Verificar localStorage al cargar (por si el mensaje no llegó)
+                        function processSavedZones() {{
+                            const savedZones = localStorage.getItem('zones_save_{p_sel}');
+                            if (savedZones) {{
+                                console.log('Zonas encontradas en localStorage, procesando...');
+                                
+                                let hiddenInput = null;
+                                const selectors = [
+                                    'input[data-testid*="zones_json_hidden_{p_sel}"]',
+                                    'input[key*="zones_json_hidden_{p_sel}"]',
+                                    'input[aria-label*="zones"]',
+                                    'input[type="text"]'
+                                ];
+                                
+                                for (let selector of selectors) {{
+                                    hiddenInput = document.querySelector(selector);
+                                    if (hiddenInput) break;
+                                }}
+                                
+                                if (hiddenInput) {{
+                                    hiddenInput.value = savedZones;
+                                    hiddenInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                    hiddenInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                    localStorage.removeItem('zones_save_{p_sel}');
+                                    setTimeout(() => {{
+                                        window.location.reload();
+                                    }}, 300);
+                                }} else {{
+                                    // Si no se encuentra el campo, intentar de nuevo después de un delay
+                                    setTimeout(processSavedZones, 500);
+                                }}
                             }}
                         }}
-                    }}, false);
+                        
+                        window.addEventListener('load', processSavedZones);
+                        // También intentar inmediatamente si el DOM ya está listo
+                        if (document.readyState === 'complete') {{
+                            setTimeout(processSavedZones, 100);
+                        }}
+                    }})();
                     </script>
                     """
                     st.markdown(auto_save_script, unsafe_allow_html=True)
-                    
-                    # Procesar guardado automático cuando cambia el campo oculto
-                    auto_save_key = f"auto_save_trigger_{p_sel}"
-                    if auto_save_key in st.session_state and st.session_state[auto_save_key]:
-                        try:
-                            zones_data = json.loads(zones_json_hidden)
-                            if zones_data:
-                                zonas[p_sel] = zones_data
-                                save_zones(zonas)
-                                st.success(f"✅ {len(zones_data)} zonas guardadas automáticamente!")
-                                st.session_state[auto_save_key] = False
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar automáticamente: {str(e)}")
-                            st.session_state[auto_save_key] = False
-                    
-                    # Detectar cambios en el campo oculto
-                    try:
-                        zones_data = json.loads(zones_json_hidden)
-                        if zones_data != existing_zones and len(zones_data) > 0:
-                            # Marcar para guardar en el siguiente rerun
-                            st.session_state[auto_save_key] = True
-                    except:
-                        pass
                     
                     st.info("💡 **Guardado Automático:** Dibuja zonas y haz clic en '💾 Guardar Zonas' en el editor. Las zonas se guardarán automáticamente.")
                             
