@@ -407,7 +407,7 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
                 let img = document.getElementById('sourceImage');
                 let isDrawing = false;
                 let startX, startY, currentX, currentY;
-                let rectangles = {existing_zones_json};
+                let rectangles = JSON.parse(`{existing_zones_json}`.replace(/&quot;/g, '"'));
                 let currentRect = null;
                 let canvasWidth = {canvas_width};
                 let canvasHeight = 0;
@@ -440,7 +440,13 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
                 
                 // Si la imagen ya está cargada, inicializar de inmediato
                 if (img.complete && img.naturalWidth > 0) {{
-                    img.onload();
+                    const aspectRatio = img.naturalHeight / img.naturalWidth;
+                    canvasHeight = Math.round(canvasWidth * aspectRatio);
+                    canvas.width = canvasWidth;
+                    canvas.height = canvasHeight;
+                    drawImageAndZones();
+                    updateZonesList();
+                    console.log('Canvas inicializado (imagen ya cargada)');
                 }}
                 
                 function drawImageAndZones() {{
@@ -745,33 +751,34 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 10, clean_pdf_text("2. Resumen de Uso Semanal por Equipo"), ln=True)
     
-    # Cálculo del promedio semanal
+    # Cálculo del resumen semanal (CORREGIDO: quitar "días asignados", agregar "% distr semanal")
     try:
-        # Asegurar que trabajamos con números
-        if "%Distrib" in distrib_df.columns:
-            col_pct = "%Distrib"
-        elif "pct" in distrib_df.columns:
-            col_pct = "pct"
-        else:
-            col_pct = None
-
-        if col_pct:
-            # MODIFICADO: Convertir a numérico para evitar error groupby
-            distrib_df[col_pct] = pd.to_numeric(distrib_df[col_pct], errors='coerce').fillna(0)
+        # Calcular total semanal por equipo
+        if "Cupos" in distrib_df.columns or "cupos" in distrib_df.columns:
+            col_cupos = "Cupos" if "Cupos" in distrib_df.columns else "cupos"
+            col_equipo = "Equipo" if "Equipo" in distrib_df.columns else "equipo"
             
-            # Agrupar por Equipo y calcular promedio
-            weekly_stats = distrib_df.groupby("Equipo")[col_pct].mean().reset_index()
-            weekly_stats.columns = ["Equipo", "Promedio Semanal"]
-            # Ordenar alfabéticamente
-            weekly_stats = weekly_stats.sort_values("Equipo")
+            # Agrupar por equipo y sumar cupos semanales
+            weekly_stats = distrib_df.groupby(col_equipo)[col_cupos].sum().reset_index()
+            weekly_stats.columns = ["Equipo", "Total Semanal"]
+            
+            # Calcular porcentaje de distribución semanal
+            total_cupos_semana = weekly_stats["Total Semanal"].sum()
+            if total_cupos_semana > 0:
+                weekly_stats["% Distr Semanal"] = (weekly_stats["Total Semanal"] / total_cupos_semana * 100).round(2)
+            else:
+                weekly_stats["% Distr Semanal"] = 0
+            
+            # Ordenar por total semanal descendente
+            weekly_stats = weekly_stats.sort_values("Total Semanal", ascending=False)
             
             # Dibujar Tabla Semanal
             pdf.set_font("Arial", 'B', 9)
-            w_wk = [100, 40]
-            h_wk = ["Equipo", "% Promedio Semanal"]
+            w_wk = [80, 40, 40]
+            h_wk = ["Equipo", "Total Semanal", "% Distr Semanal"]
             
             # Centrar un poco la tabla
-            start_x = 35
+            start_x = 25
             pdf.set_x(start_x)
             for w, h in zip(w_wk, h_wk): pdf.cell(w, 6, clean_pdf_text(h), 1)
             pdf.ln()
@@ -779,9 +786,9 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             pdf.set_font("Arial", '', 9)
             for _, row in weekly_stats.iterrows():
                 pdf.set_x(start_x)
-                pdf.cell(w_wk[0], 6, clean_pdf_text(str(row["Equipo"])[:50]), 1)
-                val = row["Promedio Semanal"]
-                pdf.cell(w_wk[1], 6, clean_pdf_text(f"{val:.1f}%"), 1)
+                pdf.cell(w_wk[0], 6, clean_pdf_text(str(row["Equipo"])[:40]), 1)
+                pdf.cell(w_wk[1], 6, clean_pdf_text(str(int(row["Total Semanal"]))), 1)
+                pdf.cell(w_wk[2], 6, clean_pdf_text(f"{row['% Distr Semanal']:.2f}%"), 1)
                 pdf.ln()
     except Exception as e:
         pdf.set_font("Arial", 'I', 9)
@@ -948,7 +955,7 @@ if menu == "Vista pública":
 
     if df.empty: st.info("Sin datos.")
     else:
-        t1, t2 = st.tabs(["Estadísticas", "Ver Planos"])
+        t1, t2, t3 = st.tabs(["Estadísticas", "Ver Planos", "Reservas de Salas"])
         with t1:
             st.markdown("""
                 <style>
@@ -967,6 +974,22 @@ if menu == "Vista pública":
             
             st.subheader("Cupos libres por piso y día")
             st.dataframe(lib, hide_index=True, width=None, use_container_width=True)
+        
+        with t3:
+            st.subheader("Reservas de Salas de Reuniones")
+            
+            # Obtener reservas de salas
+            df_salas = get_room_reservations_df(conn)
+            
+            if df_salas.empty:
+                st.info("No hay reservas de salas registradas.")
+            else:
+                # Crear tabla con equipo, sala y hora
+                df_tabla = df_salas[['user_name', 'room_name', 'reservation_date', 'start_time', 'end_time', 'piso']].copy()
+                df_tabla.columns = ['Equipo', 'Sala', 'Fecha', 'Hora Inicio', 'Hora Fin', 'Piso']
+                df_tabla = df_tabla.sort_values(['Fecha', 'Hora Inicio'])
+                
+                st.dataframe(df_tabla, hide_index=True, width=None, use_container_width=True)
         
         with t2:
             st.subheader("Descarga de Planos")
@@ -1059,86 +1082,194 @@ elif menu == "Reservas":
                 if not rg.empty:
                     hay_config = True
                     total_cupos = int(rg.iloc[0]["cupos"])
-                    
-                    all_res = list_reservations_df(conn)
-                    ocupados = 0
-                    if not all_res.empty:
-                        mask = (all_res["reservation_date"].astype(str) == str(fe)) & \
-                               (all_res["piso"] == pi) & \
-                               (all_res["team_area"] == "Cupos libres")
-                        ocupados = len(all_res[mask])
-                    
-                    disponibles = total_cupos - ocupados
-                
-                if not hay_config:
-                    st.warning(f"⚠️ El {pi} no tiene habilitados 'Cupos libres' para los días {dn}.")
                 else:
-                    if disponibles > 0:
-                        st.success(f"✅ **HAY CUPO: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
-                    else:
-                        st.error(f"🔴 **AGOTADO: Se ocuparon los {total_cupos} puestos del día.**")
+                    # CORREGIDO: Si no hay configuración, permitir al menos 1 cupo por piso/día
+                    hay_config = True
+                    total_cupos = 1  # Mínimo 1 cupo disponible por piso/día
+                
+                # Calcular ocupados
+                all_res = list_reservations_df(conn)
+                ocupados = 0
+                if not all_res.empty:
+                    mask = (all_res["reservation_date"].astype(str) == str(fe)) & \
+                           (all_res["piso"] == pi) & \
+                           (all_res["team_area"] == "Cupos libres")
+                    ocupados = len(all_res[mask])
+                
+                disponibles = max(0, total_cupos - ocupados)
+                
+                # Asegurar que siempre haya al menos 1 cupo disponible si no está agotado
+                if disponibles == 0 and ocupados < total_cupos:
+                    disponibles = 1
+                
+                if disponibles > 0:
+                    st.success(f"✅ **HAY CUPO: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
+                else:
+                    st.error(f"🔴 **AGOTADO: Se ocuparon los {total_cupos} puestos del día.**")
+                
+                st.markdown("### Datos del Solicitante")
+                
+                # Obtener lista de equipos para seleccionar área
+                equipos_disponibles = sorted(df[df["piso"] == pi]["equipo"].unique().tolist())
+                equipos_disponibles = [e for e in equipos_disponibles if e != "Cupos libres"]
+                
+                with st.form("form_puesto"):
+                    cf1, cf2 = st.columns(2)
+                    # CAMBIO: Área/Equipo en lugar de nombre
+                    area_equipo = cf1.selectbox("Área / Equipo", equipos_disponibles if equipos_disponibles else ["General"])
+                    em = cf2.text_input("Correo Electrónico")
                     
-                    st.markdown("### Datos del Solicitante")
+                    submitted = st.form_submit_button("Confirmar Reserva", type="primary", disabled=(disponibles <= 0))
                     
-                    with st.form("form_puesto"):
-                        cf1, cf2 = st.columns(2)
-                        nm = cf1.text_input("Nombre Completo")
-                        em = cf2.text_input("Correo Electrónico")
-                        
-                        submitted = st.form_submit_button("Confirmar Reserva", type="primary", disabled=(disponibles <= 0))
-                        
-                        if submitted:
-                            if not nm or not em:
-                                st.error("Por favor completa nombre y correo.")
-                            elif user_has_reservation(conn, em, str(fe)):
-                                st.error("Ya tienes una reserva registrada para esta fecha.")
-                            elif count_monthly_free_spots(conn, em, fe) >= 2:
-                                st.error("Has alcanzado tu límite de 2 reservas mensuales.")
-                            elif disponibles <= 0:
-                                st.error("Lo sentimos, el cupo se acaba de agotar.")
-                            else:
-                                add_reservation(conn, nm, em, pi, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
-                                msg = f"✅ Reserva Confirmada:\n\n- Usuario: {nm}\n- Fecha: {fe}\n- Piso: {pi}\n- Tipo: Puesto Flex"
-                                st.success(msg)
-                                send_reservation_email(em, "Confirmación Puesto", msg.replace("\n","<br>"))
-                                st.rerun()
+                    if submitted:
+                        if not em:
+                            st.error("Por favor completa el correo electrónico.")
+                        elif user_has_reservation(conn, em, str(fe)):
+                            st.error("Ya tienes una reserva registrada para esta fecha.")
+                        elif count_monthly_free_spots(conn, em, fe) >= 2:
+                            st.error("Has alcanzado tu límite de 2 reservas mensuales.")
+                        elif disponibles <= 0:
+                            st.error("Lo sentimos, el cupo se acaba de agotar.")
+                        else:
+                            # Usar el área/equipo como nombre (el correo identifica al usuario)
+                            add_reservation(conn, area_equipo, em, pi, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
+                            msg = f"✅ Reserva Confirmada:\n\n- Área/Equipo: {area_equipo}\n- Fecha: {fe}\n- Piso: {pi}\n- Tipo: Puesto Flex"
+                            st.success(msg)
+                            send_reservation_email(em, "Confirmación Puesto", msg.replace("\n","<br>"))
+                            st.rerun()
 
     # ---------------------------------------------------------
     # OPCIÓN 2: RESERVAR SALA
     # ---------------------------------------------------------
     elif opcion_reserva == "🏢 Reservar Sala de Reuniones":
-        st.subheader("Agendar Sala")
+        st.subheader("Agendar Sala de Reuniones")
+        st.info("💡 Selecciona tu equipo/área y luego elige la sala y horario disponible")
         
-        c_sala, c_fecha = st.columns(2)
-        sl = c_sala.selectbox("Selecciona Sala", ["Sala 1 (Piso 1)", "Sala 2 (Piso 2)", "Sala 3 (Piso 3)"])
-        pi_s = "Piso " + sl.split("Piso ")[1].replace(")", "")
-        fe_s = c_fecha.date_input("Fecha", min_value=datetime.date.today(), key="fs")
+        # Obtener lista de equipos desde la distribución
+        df_dist = read_distribution_df(conn)
+        equipos_lista = []
+        if not df_dist.empty:
+            equipos_lista = sorted([e for e in df_dist["equipo"].unique() if e != "Cupos libres"])
         
-        tm = generate_time_slots("08:00", "20:00", 15)
-        
-        st.write("Horario:")
-        ch1, ch2 = st.columns(2)
-        i = ch1.selectbox("Inicio", tm)
-        f = ch2.selectbox("Fin", tm, index=min(4, len(tm)-1))
-        
-        st.markdown("### Datos del Responsable")
-        with st.form("form_sala"):
-            cf1, cf2 = st.columns(2)
-            n_s = cf1.text_input("Nombre Solicitante")
-            e_s = cf2.text_input("Correo Solicitante")
+        if not equipos_lista:
+            st.warning("⚠️ No hay equipos configurados. Contacta al administrador.")
+        else:
+            # Pestañas plegables por equipo (estilo horas médicas)
+            st.markdown("### Selecciona tu Equipo/Área")
+            equipo_seleccionado = st.selectbox("Equipo/Área", equipos_lista, key="equipo_sala_sel")
             
-            sub_sala = st.form_submit_button("Confirmar Sala", type="primary")
+            st.markdown("---")
+            st.markdown("### Selecciona Sala y Horario")
             
-            if sub_sala:
-                if not n_s:
-                    st.error("Falta el nombre.")
-                elif check_room_conflict(get_room_reservations_df(conn).to_dict("records"), str(fe_s), sl, i, f):
-                    st.error("❌ Conflicto: La sala ya está ocupada en ese horario.")
-                else:
-                    add_room_reservation(conn, n_s, e_s, pi_s, sl, str(fe_s), i, f, datetime.datetime.now(datetime.timezone.utc).isoformat())
-                    msg = f"✅ Sala Confirmada:\n\n- Sala: {sl}\n- Fecha: {fe_s}\n- Horario: {i} - {f}"
-                    st.success(msg)
-                    if e_s: send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
+            # CORREGIDO: Lista completa de salas (4 salas)
+            salas_disponibles = [
+                "Sala Reuniones Pequeña Piso 1",
+                "Sala Reuniones Grande Piso 1", 
+                "Sala Reuniones Piso 2",
+                "Sala Reuniones Piso 3"
+            ]
+            
+            c_sala, c_fecha = st.columns(2)
+            sl = c_sala.selectbox("Selecciona Sala", salas_disponibles, key="sala_sel")
+            
+            # Determinar piso desde el nombre de la sala
+            if "Piso 1" in sl:
+                pi_s = "Piso 1"
+            elif "Piso 2" in sl:
+                pi_s = "Piso 2"
+            elif "Piso 3" in sl:
+                pi_s = "Piso 3"
+            else:
+                pi_s = "Piso 1"
+            
+            fe_s = c_fecha.date_input("Fecha", min_value=datetime.date.today(), key="fs_sala")
+            
+            # Obtener reservas existentes para esta sala y fecha
+            df_reservas_sala = get_room_reservations_df(conn)
+            reservas_hoy = []
+            if not df_reservas_sala.empty:
+                mask = (df_reservas_sala["reservation_date"].astype(str) == str(fe_s)) & \
+                       (df_reservas_sala["room_name"] == sl)
+                reservas_hoy = df_reservas_sala[mask].to_dict("records")
+            
+            # Generar slots de una hora (formato horas médicas)
+            tm = generate_time_slots("08:00", "18:00", 60)  # Slots de 1 hora
+            
+            st.markdown("#### Horarios Disponibles")
+            
+            # Mostrar horarios ocupados y disponibles (estilo calendario médico)
+            if reservas_hoy:
+                horarios_ocupados = ', '.join([f"{r.get('start_time', '')} - {r.get('end_time', '')}" for r in reservas_hoy])
+                st.warning(f"⚠️ Horarios ocupados: {horarios_ocupados}")
+            
+            # Crear grid de horarios disponibles
+            cols_horarios = st.columns(4)
+            horarios_disponibles = []
+            
+            for idx, hora_inicio in enumerate(tm):
+                # Calcular hora fin (1 hora después)
+                hora_obj = datetime.datetime.strptime(hora_inicio, "%H:%M")
+                hora_fin_obj = hora_obj + datetime.timedelta(hours=1)
+                hora_fin = hora_fin_obj.strftime("%H:%M")
+                
+                # Verificar si está ocupado
+                ocupado = False
+                for r in reservas_hoy:
+                    r_start = r.get('start_time', '')
+                    r_end = r.get('end_time', '')
+                    if r_start and r_end:
+                        # Verificar traslape
+                        if check_room_conflict([r], str(fe_s), sl, hora_inicio, hora_fin):
+                            ocupado = True
+                            break
+                
+                if not ocupado:
+                    horarios_disponibles.append((hora_inicio, hora_fin))
+            
+            if not horarios_disponibles:
+                st.error("🔴 No hay horarios disponibles para esta sala en la fecha seleccionada.")
+            else:
+                # Mostrar horarios disponibles en grid
+                st.markdown("**Horarios disponibles (1 hora):**")
+                grid_cols = st.columns(min(4, len(horarios_disponibles)))
+                horario_seleccionado = None
+                
+                for idx, (h_inicio, h_fin) in enumerate(horarios_disponibles):
+                    col_idx = idx % 4
+                    with grid_cols[col_idx]:
+                        if st.button(f"{h_inicio} - {h_fin}", key=f"slot_{idx}", use_container_width=True):
+                            horario_seleccionado = (h_inicio, h_fin)
+                            st.session_state['selected_slot'] = horario_seleccionado
+                
+                # Si hay un horario seleccionado, mostrar formulario
+                if 'selected_slot' in st.session_state:
+                    h_inicio, h_fin = st.session_state['selected_slot']
+                    
+                    st.markdown("---")
+                    st.markdown(f"### Confirmar Reserva: {h_inicio} - {h_fin}")
+                    
+                    with st.form("form_sala"):
+                        st.info(f"**Equipo/Área:** {equipo_seleccionado}\n\n**Sala:** {sl}\n\n**Fecha:** {fe_s}\n\n**Horario:** {h_inicio} - {h_fin}")
+                        
+                        e_s = st.text_input("Correo Electrónico", key="email_sala")
+                        
+                        sub_sala = st.form_submit_button("✅ Confirmar Reserva", type="primary")
+                        
+                        if sub_sala:
+                            if not e_s:
+                                st.error("Por favor ingresa tu correo electrónico.")
+                            elif check_room_conflict(get_room_reservations_df(conn).to_dict("records"), str(fe_s), sl, h_inicio, h_fin):
+                                st.error("❌ Conflicto: La sala ya está ocupada en ese horario.")
+                                del st.session_state['selected_slot']
+                            else:
+                                # Usar equipo como nombre, correo identifica al usuario
+                                add_room_reservation(conn, equipo_seleccionado, e_s, pi_s, sl, str(fe_s), h_inicio, h_fin, datetime.datetime.now(datetime.timezone.utc).isoformat())
+                                msg = f"✅ Sala Confirmada:\n\n- Equipo/Área: {equipo_seleccionado}\n- Sala: {sl}\n- Fecha: {fe_s}\n- Horario: {h_inicio} - {h_fin}"
+                                st.success(msg)
+                                if e_s: 
+                                    send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
+                                del st.session_state['selected_slot']
+                                st.rerun()
 
     # ---------------------------------------------------------
     # OPCIÓN 3: GESTIONAR (ANULAR Y VER TODO)
@@ -1906,22 +2037,221 @@ elif menu == "Administrador":
             st.dataframe(df_deficit, hide_index=True, width=None, use_container_width=True)
             st.markdown("---")
 
-        rf = st.selectbox("Formato Reporte", ["Excel", "PDF"])
-        if st.button("Generar Reporte"):
+        # Separar informes de cupos y salas
+        st.markdown("### 📊 Informes de Distribución")
+        rf = st.selectbox("Formato Reporte", ["Excel (XLSX)", "PDF"], key="report_format")
+        if st.button("Generar Reporte de Distribución", key="gen_dist_report"):
             df_raw = read_distribution_df(conn); df_raw = apply_sorting_to_df(df_raw)
             if "Excel" in rf:
                 b = BytesIO()
-                with pd.ExcelWriter(b) as w: df_raw.to_excel(w, index=False)
-                st.session_state['rd'] = b.getvalue(); st.session_state['rn'] = "d.xlsx"; st.session_state['rm'] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                with pd.ExcelWriter(b, engine='openpyxl') as w: 
+                    df_raw.to_excel(w, index=False, sheet_name='Distribución')
+                st.session_state['rd'] = b.getvalue(); st.session_state['rn'] = "distribucion.xlsx"; st.session_state['rm'] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             else:
                 df = df_raw.rename(columns={"piso":"Piso","equipo":"Equipo","dia":"Día","cupos":"Cupos","pct":"%Distrib"})
                 d_data = st.session_state.get('deficit_report', [])
                 st.session_state['rd'] = generate_full_pdf(df, df, logo_path=Path(global_logo_path), deficit_data=d_data)
                 st.session_state['rn'] = "reporte_distribucion.pdf"; st.session_state['rm'] = "application/pdf"
-            st.success("OK")
-        if 'rd' in st.session_state: st.download_button("Descargar", st.session_state['rd'], st.session_state['rn'], mime=st.session_state['rm'])
+            st.success("✅ Reporte generado")
+        if 'rd' in st.session_state: st.download_button("📥 Descargar Reporte de Distribución", st.session_state['rd'], st.session_state['rn'], mime=st.session_state['rm'], key="dl_dist_report")
         
         st.markdown("---")
+        st.markdown("### 📈 Informes de Reservas (Solo Admin)")
+        
+        # Informe de reservas de cupos
+        st.markdown("#### 🪑 Reservas de Cupos")
+        if st.button("Generar Informe de Cupos", key="gen_cupos_report"):
+            df_cupos = list_reservations_df(conn)
+            if not df_cupos.empty:
+                # Calcular estadísticas por persona y equipo
+                df_cupos_stats = df_cupos.groupby(['user_name', 'user_email', 'team_area']).agg({
+                    'reservation_date': 'count'
+                }).reset_index()
+                df_cupos_stats.columns = ['Nombre', 'Correo', 'Equipo/Área', 'Cantidad Reservas']
+                df_cupos_stats = df_cupos_stats.sort_values('Cantidad Reservas', ascending=False)
+                
+                # Calcular porcentajes
+                total_reservas = df_cupos_stats['Cantidad Reservas'].sum()
+                if total_reservas > 0:
+                    df_cupos_stats['% del Total'] = (df_cupos_stats['Cantidad Reservas'] / total_reservas * 100).round(2)
+                else:
+                    df_cupos_stats['% del Total'] = 0
+                
+                b = BytesIO()
+                with pd.ExcelWriter(b, engine='openpyxl') as w:
+                    df_cupos_stats.to_excel(w, index=False, sheet_name='Por Persona')
+                    # También por equipo
+                    df_equipo_stats = df_cupos.groupby('team_area').agg({
+                        'reservation_date': 'count'
+                    }).reset_index()
+                    df_equipo_stats.columns = ['Equipo/Área', 'Cantidad Reservas']
+                    df_equipo_stats = df_equipo_stats.sort_values('Cantidad Reservas', ascending=False)
+                    total_equipo = df_equipo_stats['Cantidad Reservas'].sum()
+                    if total_equipo > 0:
+                        df_equipo_stats['% del Total'] = (df_equipo_stats['Cantidad Reservas'] / total_equipo * 100).round(2)
+                    else:
+                        df_equipo_stats['% del Total'] = 0
+                    df_equipo_stats.to_excel(w, index=False, sheet_name='Por Equipo')
+                
+                st.session_state['cupos_report'] = b.getvalue()
+                st.session_state['cupos_report_name'] = "reservas_cupos.xlsx"
+                st.success("✅ Informe de cupos generado")
+            else:
+                st.warning("No hay reservas de cupos registradas")
+        
+        if 'cupos_report' in st.session_state:
+            st.download_button("📥 Descargar Informe de Cupos", st.session_state['cupos_report'], 
+                             st.session_state['cupos_report_name'], 
+                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             key="dl_cupos_report")
+        
+        # Informe de reservas de salas
+        st.markdown("#### 🏢 Reservas de Salas")
+        if st.button("Generar Informe de Salas", key="gen_salas_report"):
+            df_salas = get_room_reservations_df(conn)
+            if not df_salas.empty:
+                # Calcular estadísticas por persona
+                df_salas_stats = df_salas.groupby(['user_name', 'user_email']).agg({
+                    'reservation_date': 'count'
+                }).reset_index()
+                df_salas_stats.columns = ['Nombre', 'Correo', 'Cantidad Reservas']
+                df_salas_stats = df_salas_stats.sort_values('Cantidad Reservas', ascending=False)
+                
+                # Calcular porcentajes
+                total_reservas = df_salas_stats['Cantidad Reservas'].sum()
+                if total_reservas > 0:
+                    df_salas_stats['% del Total'] = (df_salas_stats['Cantidad Reservas'] / total_reservas * 100).round(2)
+                else:
+                    df_salas_stats['% del Total'] = 0
+                
+                b = BytesIO()
+                with pd.ExcelWriter(b, engine='openpyxl') as w:
+                    df_salas_stats.to_excel(w, index=False, sheet_name='Por Persona')
+                    # También por sala
+                    df_sala_stats = df_salas.groupby('room_name').agg({
+                        'reservation_date': 'count'
+                    }).reset_index()
+                    df_sala_stats.columns = ['Sala', 'Cantidad Reservas']
+                    df_sala_stats = df_sala_stats.sort_values('Cantidad Reservas', ascending=False)
+                    total_sala = df_sala_stats['Cantidad Reservas'].sum()
+                    if total_sala > 0:
+                        df_sala_stats['% del Total'] = (df_sala_stats['Cantidad Reservas'] / total_sala * 100).round(2)
+                    else:
+                        df_sala_stats['% del Total'] = 0
+                    df_sala_stats.to_excel(w, index=False, sheet_name='Por Sala')
+                
+                st.session_state['salas_report'] = b.getvalue()
+                st.session_state['salas_report_name'] = "reservas_salas.xlsx"
+                st.success("✅ Informe de salas generado")
+            else:
+                st.warning("No hay reservas de salas registradas")
+        
+        if 'salas_report' in st.session_state:
+            st.download_button("📥 Descargar Informe de Salas", st.session_state['salas_report'], 
+                             st.session_state['salas_report_name'], 
+                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             key="dl_salas_report")
+        
+        # Informe de toma de salas y cupos (ordenado por frecuencia)
+        st.markdown("---")
+        st.markdown("### 📊 Informe de Toma de Salas y Cupos (Por Frecuencia)")
+        if st.button("Generar Informe de Toma", key="gen_toma_report"):
+            df_cupos = list_reservations_df(conn)
+            df_salas = get_room_reservations_df(conn)
+            
+            b = BytesIO()
+            with pd.ExcelWriter(b, engine='openpyxl') as w:
+                if not df_cupos.empty:
+                    # Por persona - cupos
+                    df_cupos_persona = df_cupos.groupby(['user_name', 'user_email']).agg({
+                        'reservation_date': 'count'
+                    }).reset_index()
+                    df_cupos_persona.columns = ['Nombre', 'Correo', 'Cantidad']
+                    df_cupos_persona = df_cupos_persona.sort_values('Cantidad', ascending=False)
+                    total_cupos = df_cupos_persona['Cantidad'].sum()
+                    if total_cupos > 0:
+                        df_cupos_persona['% Asociación'] = (df_cupos_persona['Cantidad'] / total_cupos * 100).round(2)
+                    else:
+                        df_cupos_persona['% Asociación'] = 0
+                    df_cupos_persona.to_excel(w, index=False, sheet_name='Cupos por Persona')
+                
+                if not df_salas.empty:
+                    # Por persona - salas
+                    df_salas_persona = df_salas.groupby(['user_name', 'user_email']).agg({
+                        'reservation_date': 'count'
+                    }).reset_index()
+                    df_salas_persona.columns = ['Nombre', 'Correo', 'Cantidad']
+                    df_salas_persona = df_salas_persona.sort_values('Cantidad', ascending=False)
+                    total_salas = df_salas_persona['Cantidad'].sum()
+                    if total_salas > 0:
+                        df_salas_persona['% Asociación'] = (df_salas_persona['Cantidad'] / total_salas * 100).round(2)
+                    else:
+                        df_salas_persona['% Asociación'] = 0
+                    df_salas_persona.to_excel(w, index=False, sheet_name='Salas por Persona')
+            
+            st.session_state['toma_report'] = b.getvalue()
+            st.session_state['toma_report_name'] = "toma_salas_cupos.xlsx"
+            st.success("✅ Informe de toma generado")
+        
+        if 'toma_report' in st.session_state:
+            st.download_button("📥 Descargar Informe de Toma", st.session_state['toma_report'], 
+                             st.session_state['toma_report_name'], 
+                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             key="dl_toma_report")
+        
+        # Informe de planos generados
+        st.markdown("---")
+        st.markdown("### 🗺️ Informe de Planos Generados")
+        if st.button("Generar Informe de Planos", key="gen_planos_report"):
+            zonas = load_zones()
+            planos_data = []
+            
+            for piso in pisos_list:
+                p_num = piso.replace("Piso ", "").strip()
+                for dia in ORDER_DIAS:
+                    ds = dia.lower().replace("é","e").replace("á","a")
+                    fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+                    fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
+                    
+                    zonas_piso = zonas.get(piso, [])
+                    num_zonas = len(zonas_piso) if zonas_piso else 0
+                    
+                    planos_data.append({
+                        'Piso': piso,
+                        'Día': dia,
+                        'Zonas Configuradas': num_zonas,
+                        'PNG Generado': 'Sí' if fpng.exists() else 'No',
+                        'PDF Generado': 'Sí' if fpdf.exists() else 'No',
+                        'Estado': 'Completo' if (fpng.exists() or fpdf.exists()) and num_zonas > 0 else 'Pendiente'
+                    })
+            
+            df_planos = pd.DataFrame(planos_data)
+            
+            b = BytesIO()
+            with pd.ExcelWriter(b, engine='openpyxl') as w:
+                df_planos.to_excel(w, index=False, sheet_name='Planos')
+                # Resumen por piso
+                df_resumen = df_planos.groupby('Piso').agg({
+                    'Zonas Configuradas': 'sum',
+                    'PNG Generado': lambda x: (x == 'Sí').sum(),
+                    'PDF Generado': lambda x: (x == 'Sí').sum(),
+                    'Estado': lambda x: (x == 'Completo').sum()
+                }).reset_index()
+                df_resumen.columns = ['Piso', 'Total Zonas', 'PNGs Generados', 'PDFs Generados', 'Días Completos']
+                df_resumen.to_excel(w, index=False, sheet_name='Resumen por Piso')
+            
+            st.session_state['planos_report'] = b.getvalue()
+            st.session_state['planos_report_name'] = "informe_planos.xlsx"
+            st.success("✅ Informe de planos generado")
+        
+        if 'planos_report' in st.session_state:
+            st.download_button("📥 Descargar Informe de Planos", st.session_state['planos_report'], 
+                             st.session_state['planos_report_name'], 
+                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             key="dl_planos_report")
+        
+        st.markdown("---")
+        st.markdown("### 📥 Descarga de Planos Individuales")
         cp, cd = st.columns(2)
         pi = cp.selectbox("Piso", pisos_list, key="pi2"); di = cd.selectbox("Día", ["Todos"]+ORDER_DIAS, key="di2")
         if di=="Todos":
