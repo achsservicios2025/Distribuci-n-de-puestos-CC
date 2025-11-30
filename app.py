@@ -1432,269 +1432,146 @@ def main():
         # T2: EDITOR VISUAL MEJORADO
         # -----------------------------------------------------------
         with t2:
-            st.info("Editor de Zonas - Asignación Visual de Equipos")
+            st.info("Editor de Zonas - Versión Profesional Mejorada")
             
-            # Cargar zonas existentes
+            # Verificar permisos de administrador
+            if not st.session_state.get("is_admin", False):
+                st.error("🔒 Acceso denegado. Solo administradores pueden acceder al editor.")
+                st.stop()
+            
             zonas = load_zones()
             
-            # Obtener datos de distribución para la lista de equipos
-            df_d = read_distribution_df(conn)
-            pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+            # Diseño en columnas para tener controles al lado del mapa
+            col_left, col_right = st.columns([2, 1])
             
-            c1, c2 = st.columns(2)
-            p_sel = c1.selectbox("Piso", pisos_list, key="piso_editor")
-            d_sel = c2.selectbox("Día de Referencia", ORDER_DIAS, key="dia_editor")
-            p_num = p_sel.replace("Piso ", "").strip()
-            
-            # Buscar imagen del plano
-            file_base = f"piso{p_num}"
-            pim = PLANOS_DIR / f"{file_base}.png"
-            if not pim.exists(): 
-                pim = PLANOS_DIR / f"{file_base}.jpg"
-            if not pim.exists():
-                pim = PLANOS_DIR / f"Piso{p_num}.png"
-            
-            if not pim.exists():
-                st.error(f"❌ No se encontró el plano para {p_sel}. Sube una imagen llamada 'piso{p_num}.png' en la carpeta 'planos'.")
-            else:
-                # Cargar y mostrar el canvas
-                img = PILImage.open(pim)
+            with col_left:
+                df_d = read_distribution_df(conn)
+                pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
                 
-                # Convertir a base64 para el canvas
-                buffered = BytesIO()
-                img.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                img_url = f"data:image/png;base64,{img_str}"
+                p_sel = st.selectbox("Piso", pisos_list, key="editor_piso")
+                p_num = p_sel.replace("Piso ", "").strip()
                 
-                # Calcular dimensiones manteniendo proporción
-                cw = 800
-                w, h = img.size
-                ch = int(h * (cw / w)) if w > cw else h
-                cw = w if w <= cw else cw
-                
-                st.subheader("🛠️ Herramientas de Dibujo")
-                st.markdown("Dibuja rectángulos sobre las áreas y asígnales equipos. Usa **Borrar** para eliminar figuras.")
-                
-                # Canvas principal
-                canvas_result = st_canvas(
-                    fill_color="rgba(0, 160, 74, 0.3)",
-                    stroke_width=2,
-                    stroke_color="#00A04A",
-                    background_image=img_url,
-                    update_streamlit=True,
-                    width=cw,
-                    height=ch,
-                    drawing_mode="rect",
-                    key=f"canvas_{p_sel}_{d_sel}",
-                )
-                
-                # Panel de control lateral
-                st.sidebar.subheader("📝 Configuración de Zonas")
-                
-                # Obtener lista de equipos disponibles
-                current_seats_dict = {}
-                equipos_disponibles = [""]  # Opción vacía inicial
-                
-                if not df_d.empty:
-                    subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-                    current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                    equipos_disponibles = [""] + sorted(subset['equipo'].unique().tolist())
-                
-                # Agregar salas según piso
-                salas_piso = []
-                if "1" in p_sel: 
-                    salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
-                elif "2" in p_sel: 
-                    salas_piso = ["Sala Reuniones - Piso 2"]
-                elif "3" in p_sel: 
-                    salas_piso = ["Sala Reuniones - Piso 3"]
+                # Búsqueda de Archivo
+                file_base = f"piso{p_num}" 
+                pim = PLANOS_DIR / f"{file_base}.png"
+                if not pim.exists(): 
+                    pim = PLANOS_DIR / f"{file_base}.jpg"
+                if not pim.exists(): 
+                    pim = PLANOS_DIR / f"Piso{p_num}.png"
                     
-                equipos_disponibles.extend(salas_piso)
-                
-                # Selector de equipo
-                equipo_seleccionado = st.sidebar.selectbox(
-                    "🏷️ Asignar a Equipo/Sala:",
-                    equipos_disponibles,
-                    key="selector_equipo"
-                )
-                
-                # Selector de color
-                color_seleccionado = st.sidebar.color_picker(
-                    "🎨 Color de la Zona:",
-                    "#00A04A",
-                    key="color_picker"
-                )
-                
-                # Mostrar información del equipo seleccionado
-                if equipo_seleccionado and equipo_seleccionado in current_seats_dict:
-                    st.sidebar.info(f"**Cupos asignados:** {current_seats_dict[equipo_seleccionado]}")
-                
-                # Botón para guardar la última figura dibujada
-                if st.sidebar.button("💾 Guardar Zona", type="primary", key="guardar_zona"):
-                    if not equipo_seleccionado:
-                        st.sidebar.error("❌ Selecciona un equipo/sala antes de guardar.")
-                    elif not canvas_result.json_data or not canvas_result.json_data.get("objects"):
-                        st.sidebar.error("❌ No hay figuras dibujadas para guardar.")
-                    else:
-                        # Obtener el último rectángulo dibujado
-                        ultimo_objeto = canvas_result.json_data["objects"][-1]
+                if pim.exists():
+                    try:
+                        # Cargar zonas existentes para este piso
+                        existing_zones = zonas.get(p_sel, [])
                         
-                        # Guardar la zona con toda la información
-                        nueva_zona = {
-                            "team": equipo_seleccionado,
-                            "x": int(ultimo_objeto.get("left", 0)),
-                            "y": int(ultimo_objeto.get("top", 0)),
-                            "w": int(ultimo_objeto.get("width", 0) * ultimo_objeto.get("scaleX", 1)),
-                            "h": int(ultimo_objeto.get("height", 0) * ultimo_objeto.get("scaleY", 1)),
-                            "color": color_seleccionado
-                        }
+                        st.success(f"✅ Plano cargado: {pim.name}")
                         
-                        # Inicializar lista para el piso si no existe
-                        if p_sel not in zonas:
-                            zonas[p_sel] = []
+                        # Mostrar componente de dibujo mejorado
+                        drawing_component = create_enhanced_drawing_component(str(pim), existing_zones, width=600)
                         
-                        # Agregar la nueva zona
-                        zonas[p_sel].append(nueva_zona)
-                        save_zones(zonas)
+                        # Área para recibir datos del componente
+                        st.markdown("---")
+                        st.subheader("📥 Datos de Zonas")
                         
-                        st.sidebar.success(f"✅ Zona guardada para: {equipo_seleccionado}")
-                        st.rerun()
-                
-                st.sidebar.markdown("---")
-                
-                # Lista y gestión de zonas existentes
-                st.sidebar.subheader("🗂️ Zonas Guardadas")
+                        # Usar un text_area para mostrar/editar el JSON
+                        zones_json = st.text_area(
+                            "Datos JSON de zonas:",
+                            value=json.dumps(existing_zones, indent=2),
+                            height=200,
+                            key="zones_json_editor"
+                        )
+                        
+                        # Botones de acción
+                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        
+                        if col_btn1.button("💾 Guardar Zonas", type="primary"):
+                            try:
+                                zonas_data = json.loads(zones_json)
+                                zonas[p_sel] = zonas_data
+                                save_zones(zonas)
+                                st.success("✅ Zonas guardadas correctamente")
+                                st.rerun()
+                            except json.JSONDecodeError:
+                                st.error("❌ Error: El texto no es un JSON válido")
+                            except Exception as e:
+                                st.error(f"❌ Error al guardar zonas: {str(e)}")
+                                
+                        if col_btn2.button("🔄 Cargar desde Componente"):
+                            st.info("Usa el botón 'Guardar Zonas' en el editor de arriba y luego actualiza esta página")
+                            
+                        if col_btn3.button("🗑️ Limpiar Todas"):
+                            if st.checkbox("¿Estás seguro de que quieres eliminar TODAS las zonas?"):
+                                zonas[p_sel] = []
+                                save_zones(zonas)
+                                st.success("✅ Todas las zonas eliminadas")
+                                st.rerun()
+                                
+                    except Exception as e:
+                        st.error(f"❌ Error en el editor: {str(e)}")
+                else:
+                    st.error(f"❌ No se encontró el plano: {p_sel}")
+                    st.info(f"💡 Busqué en: {pim}")
+
+            with col_right:
+                st.subheader("🎨 Configuración de Zonas")
                 
                 if p_sel in zonas and zonas[p_sel]:
-                    for i, zona in enumerate(zonas[p_sel]):
-                        col1, col2 = st.sidebar.columns([3, 1])
-                        with col1:
-                            st.markdown(
-                                f"<span style='color:{zona['color']}; font-size: 20px;'>■</span> "
-                                f"**{zona['team']}**",
-                                unsafe_allow_html=True
-                            )
-                        with col2:
-                            if st.button("🗑️", key=f"del_{i}_{p_sel}"):
-                                zonas[p_sel].pop(i)
-                                save_zones(zonas)
-                                st.sidebar.success("Zona eliminada")
-                                st.rerun()
-                else:
-                    st.sidebar.info("No hay zonas guardadas para este piso.")
-                
-                # Sección de personalización del plano
-                st.markdown("---")
-                st.subheader("🎨 Personalización del Plano")
-                
-                with st.expander("Configurar Estilos y Textos", expanded=True):
-                    col_title, col_subtitle = st.columns(2)
+                    st.success(f"✅ {len(zonas[p_sel])} zonas guardadas para {p_sel}")
                     
-                    titulo_principal = col_title.text_input(
-                        "Título Principal", 
-                        f"Distribución {p_sel}",
-                        key="titulo_principal"
-                    )
+                    # Editor de zonas existentes
+                    st.markdown("#### ✏️ Editar Zona Existente")
+                    zone_options = [f"{i+1}. {z.get('team', 'Sin nombre')} ({z['x']}, {z['y']})" 
+                                for i, z in enumerate(zonas[p_sel])]
                     
-                    subtitulo = col_subtitle.text_input(
-                        "Subtítulo", 
-                        f"Día: {d_sel}",
-                        key="subtitulo"
-                    )
-                    
-                    # Configuración de fuentes y alineación
-                    st.markdown("#### Tipografías y Tamaños")
-                    
-                    col_font1, col_font2, col_font3 = st.columns(3)
-                    
-                    fuente_titulo = col_font1.selectbox(
-                        "Fuente Título",
-                        ["Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana"],
-                        key="fuente_titulo"
-                    )
-                    
-                    fuente_subtitulo = col_font2.selectbox(
-                        "Fuente Subtítulo", 
-                        ["Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana"],
-                        key="fuente_subtitulo"
-                    )
-                    
-                    fuente_leyenda = col_font3.selectbox(
-                        "Fuente Leyenda",
-                        ["Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana"],
-                        key="fuente_leyenda"
-                    )
-                    
-                    # Configuración visual
-                    col_vis1, col_vis2 = st.columns(2)
-                    
-                    mostrar_logo = col_vis1.checkbox("Mostrar Logo", True, key="mostrar_logo")
-                    mostrar_leyenda = col_vis2.checkbox("Mostrar Leyenda", True, key="mostrar_leyenda")
-                    
-                    # Botón para generar vista previa
-                    if st.button("🔄 Generar Vista Previa", type="secondary"):
-                        config_estilos = {
-                            "title_text": titulo_principal,
-                            "subtitle_text": subtitulo,
-                            "title_font": fuente_titulo,
-                            "subtitle_font": fuente_subtitulo,
-                            "legend_font": fuente_leyenda,
-                            "use_logo": mostrar_logo,
-                            "use_legend": mostrar_leyenda,
-                        }
-                        
-                        # Guardar configuración en session state
-                        st.session_state['last_style_config'] = config_estilos
-                        
-                        # Generar plano coloreado
-                        formato = "PNG"  # Podríamos hacer esto seleccionable
-                        output_path = generate_colored_plan(
-                            p_sel, d_sel, current_seats_dict, 
-                            formato, config_estilos, global_logo_path
+                    if zone_options:
+                        selected_zone_idx = st.selectbox(
+                            "Selecciona una zona:",
+                            range(len(zone_options)),
+                            format_func=lambda x: zone_options[x],
+                            key="zone_selector"
                         )
                         
-                        if output_path and Path(output_path).exists():
-                            st.success("✅ Vista previa generada correctamente")
-                        else:
-                            st.error("❌ Error al generar la vista previa")
-                
-                # Mostrar vista previa si existe
-                ds_formatted = d_sel.lower().replace("é", "e").replace("á", "a")
-                archivo_previa = COLORED_DIR / f"piso_{p_num}_{ds_formatted}_combined.png"
-                
-                if archivo_previa.exists():
-                    st.image(str(archivo_previa), use_column_width=True, caption="Vista Previa del Plano")
-                    
-                    # Opciones de descarga
-                    col_dl1, col_dl2 = st.columns(2)
-                    
-                    with open(archivo_previa, "rb") as f:
-                        col_dl1.download_button(
-                            "📥 Descargar PNG",
-                            f,
-                            f"plano_{p_sel}_{d_sel}.png",
-                            "image/png",
-                            use_container_width=True
-                        )
-                    
-                    # También generar PDF si se desea
-                    if col_dl2.button("📄 Generar PDF", use_container_width=True):
-                        with st.spinner("Generando PDF..."):
-                            config_pdf = st.session_state.get('last_style_config', {})
-                            pdf_path = generate_colored_plan(
-                                p_sel, d_sel, current_seats_dict,
-                                "PDF", config_pdf, global_logo_path
-                            )
+                        if selected_zone_idx is not None:
+                            zone = zonas[p_sel][selected_zone_idx]
                             
-                            if pdf_path and Path(pdf_path).exists():
-                                with open(pdf_path, "rb") as f:
-                                    st.download_button(
-                                        "📥 Descargar PDF",
-                                        f,
-                                        f"plano_{p_sel}_{d_sel}.pdf",
-                                        "application/pdf",
-                                        use_container_width=True
-                                    )
+                            # Controles de edición
+                            new_team = st.text_input("Nombre del equipo:", 
+                                                value=zone.get('team', 'Nueva Zona'),
+                                                key=f"team_{selected_zone_idx}")
+                            
+                            new_color = st.color_picker("Color:", 
+                                                    value=zone.get('color', '#00A04A'),
+                                                    key=f"color_{selected_zone_idx}")
+                            
+                            col_edit1, col_edit2 = st.columns(2)
+                            
+                            with col_edit1:
+                                if st.button("💾 Actualizar Zona", key=f"update_{selected_zone_idx}"):
+                                    zonas[p_sel][selected_zone_idx]['team'] = new_team
+                                    zonas[p_sel][selected_zone_idx]['color'] = new_color
+                                    save_zones(zonas)
+                                    st.success("✅ Zona actualizada")
+                                    st.rerun()
+                            
+                            with col_edit2:
+                                if st.button("🗑️ Eliminar Zona", key=f"delete_{selected_zone_idx}"):
+                                    zonas[p_sel].pop(selected_zone_idx)
+                                    save_zones(zonas)
+                                    st.success("✅ Zona eliminada")
+                                    st.rerun()
+                    
+                    # Leyenda de colores
+                    st.markdown("#### 🎨 Leyenda de Colores")
+                    for i, z in enumerate(zonas[p_sel]):
+                        col_leg1, col_leg2 = st.columns([1, 4])
+                        with col_leg1:
+                            st.color_picker("", z.get('color', '#00A04A'), key=f"legend_{i}", disabled=True)
+                        with col_leg2:
+                            st.write(f"**{z.get('team', 'Sin nombre')}**")
+                            
+                else:
+                    st.warning("ℹ️ No hay zonas guardadas para este piso. Usa el editor de la izquierda para crear zonas.")
+
         # -----------------------------------------------------------
         # T3: INFORMES
         # -----------------------------------------------------------
