@@ -965,110 +965,110 @@ elif menu == "Administrador":
     # -----------------------------------------------------------
     # T2: EDITOR VISUAL
     # -----------------------------------------------------------
-with t2:
-    st.info("Editor de Zonas")
-    zonas = load_zones()
-    c1, c2 = st.columns(2)
+    with t2:
+        st.info("Editor de Zonas")
+        zonas = load_zones()
+        c1, c2 = st.columns(2)
     
-    df_d = read_distribution_df(conn)
-    pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+        df_d = read_distribution_df(conn)
+        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
     
-    p_sel = c1.selectbox("Piso", pisos_list, key="editor_piso")
-    d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
-    p_num = p_sel.replace("Piso ", "").strip()
+        p_sel = c1.selectbox("Piso", pisos_list, key="editor_piso")
+        d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
+        p_num = p_sel.replace("Piso ", "").strip()
     
     # 1. Búsqueda de Archivo
-    file_base = f"piso{p_num}" 
-    pim = PLANOS_DIR / f"{file_base}.png"
-    if not pim.exists(): 
-        pim = PLANOS_DIR / f"{file_base}.jpg"
-    if not pim.exists(): 
-        pim = PLANOS_DIR / f"Piso{p_num}.png"
+        file_base = f"piso{p_num}" 
+        pim = PLANOS_DIR / f"{file_base}.png"
+        if not pim.exists(): 
+            pim = PLANOS_DIR / f"{file_base}.jpg"
+        if not pim.exists(): 
+            pim = PLANOS_DIR / f"Piso{p_num}.png"
         
-    if pim.exists():
-        try:
+        if pim.exists():
+            try:
             # Cargar y preparar imagen
-            img = PILImage.open(pim)
-            original_width, original_height = img.size
+                img = PILImage.open(pim)
+                original_width, original_height = img.size
             
             # Redimensionar para el canvas
-            max_display_width = 700
-            if original_width > max_display_width:
-                ratio = max_display_width / original_width
-                display_height = int(original_height * ratio)
-                display_width = max_display_width
-            else:
-                display_width = original_width
-                display_height = original_height
+                max_display_width = 700
+                if original_width > max_display_width:
+                    ratio = max_display_width / original_width
+                    display_height = int(original_height * ratio)
+                    display_width = max_display_width
+                else:
+                    display_width = original_width
+                    display_height = original_height
 
             # SOLUCIÓN DEFINITIVA: Canvas con imagen base64
-            import base64
-            from io import BytesIO
+                import base64
+                from io import BytesIO
             
             # Redimensionar imagen para el canvas
-            img_display = img.resize((display_width, display_height), PILImage.Resampling.LANCZOS)
+                img_display = img.resize((display_width, display_height), PILImage.Resampling.LANCZOS)
             
             # Convertir a base64 CORRECTAMENTE
-            buffered = BytesIO()
-            img_display.save(buffered, format="PNG")
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+                buffered = BytesIO()
+                img_display.save(buffered, format="PNG")
+                img_base64 = base64.b64encode(buffered.getvalue()).decode()
             
             # Canvas con la imagen como fondo
-            canvas_result = st_canvas(
-                fill_color="rgba(0, 160, 74, 0.3)",
-                stroke_width=3,
-                stroke_color="#00A04A", 
-                background_image=f"data:image/png;base64,{img_base64}",
-                update_streamlit=True,
-                width=display_width,
-                height=display_height,
-                drawing_mode="rect",
-                key=f"canvas_{p_sel}_{d_sel}",
+                canvas_result = st_canvas(
+                    fill_color="rgba(0, 160, 74, 0.3)",
+                    stroke_width=3,
+                    stroke_color="#00A04A", 
+                    background_image=f"data:image/png;base64,{img_base64}",
+                    update_streamlit=True,
+                    width=display_width,
+                    height=display_height,
+                    drawing_mode="rect",
+                    key=f"canvas_{p_sel}_{d_sel}",
             )
             
-            st.info("💡 **Instrucciones:** Dibuja rectángulos sobre las áreas del plano donde quieras asignar equipos")
+                st.info("💡 **Instrucciones:** Dibuja rectángulos sobre las áreas del plano donde quieras asignar equipos")
             
             # Configuración de zonas
-            current_seats_dict = {}
-            eqs = [""]
-            if not df_d.empty:
-                subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-                current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                eqs += sorted(subset['equipo'].unique().tolist())
+                current_seats_dict = {}
+                eqs = [""]
+                if not df_d.empty:
+                    subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
+                    current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
+                    eqs += sorted(subset['equipo'].unique().tolist())
             
-            salas_piso = []
-            if "1" in p_sel: salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
-            elif "2" in p_sel: salas_piso = ["Sala Reuniones - Piso 2"]
-            elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
-            eqs = eqs + salas_piso
+                salas_piso = []
+                if "1" in p_sel: salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
+                elif "2" in p_sel: salas_piso = ["Sala Reuniones - Piso 2"]
+                elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
+                eqs = eqs + salas_piso
 
             # Selección de equipo y color
-            st.markdown("---")
-            st.subheader("Configurar Zona")
-            c1, c2, c3 = st.columns([2, 1, 1])
-            tn = c1.selectbox("Equipo / Sala", eqs, key="editor_equipo")
-            tc = c2.color_picker("Color", "#00A04A", key="editor_color")
+                st.markdown("---")
+                st.subheader("Configurar Zona")
+                c1, c2, c3 = st.columns([2, 1, 1])
+                tn = c1.selectbox("Equipo / Sala", eqs, key="editor_equipo")
+                tc = c2.color_picker("Color", "#00A04A", key="editor_color")
 
-            if tn and tn in current_seats_dict:
-                st.info(f"Cupos: {current_seats_dict[tn]}")
+                if tn and tn in current_seats_dict:
+                    st.info(f"Cupos: {current_seats_dict[tn]}")
 
             # Guardar zona dibujada
-            if c3.button("💾 Guardar Zona", type="primary", key="guardar_zona"):
-                if tn and canvas_result.json_data and canvas_result.json_data.get("objects"):
+                if c3.button("💾 Guardar Zona", type="primary", key="guardar_zona"):
+                    if tn and canvas_result.json_data and canvas_result.json_data.get("objects"):
                     # Tomar el último rectángulo dibujado
-                    o = canvas_result.json_data["objects"][-1]
+                        o = canvas_result.json_data["objects"][-1]
                     
                     # Convertir coordenadas del canvas a coordenadas de la imagen original
-                    scale_x = original_width / display_width
-                    scale_y = original_height / display_height
+                        scale_x = original_width / display_width
+                        scale_y = original_height / display_height
                     
-                    zonas.setdefault(p_sel, []).append({
-                        "team": tn,
-                        "x": int(o.get("left", 0) * scale_x),
-                        "y": int(o.get("top", 0) * scale_y), 
-                        "w": int(o.get("width", 0) * o.get("scaleX", 1) * scale_x),
-                        "h": int(o.get("height", 0) * o.get("scaleY", 1) * scale_y),
-                        "color": tc
+                        zonas.setdefault(p_sel, []).append({
+                            "team": tn,
+                            "x": int(o.get("left", 0) * scale_x),
+                            "y": int(o.get("top", 0) * scale_y), 
+                            "w": int(o.get("width", 0) * o.get("scaleX", 1) * scale_x),
+                            "h": int(o.get("height", 0) * o.get("scaleY", 1) * scale_y),
+                            "color": tc
                     })
                     save_zones(zonas)
                     st.success("✅ Zona guardada correctamente")
@@ -1077,12 +1077,12 @@ with t2:
                     st.error("❌ No hay figura dibujada o no seleccionaste equipo")
 
             # Mostrar zonas existentes
-            if p_sel in zonas and zonas[p_sel]:
-                st.markdown("---")
-                st.subheader("Zonas Guardadas")
-                for i, z in enumerate(zonas[p_sel]):
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    col1.markdown(
+                if p_sel in zonas and zonas[p_sel]:
+                    st.markdown("---")
+                    st.subheader("Zonas Guardadas")
+                    for i, z in enumerate(zonas[p_sel]):
+                        col1, col2, col3 = st.columns([3, 1, 1])
+                        col1.markdown(
                         f"<span style='color:{z['color']}; font-size: 20px;'>■</span> **{z['team']}** ",
                         unsafe_allow_html=True
                     )
@@ -1092,11 +1092,11 @@ with t2:
                         save_zones(zonas)
                         st.success("Zona eliminada")
                         st.rerun()
-                    
-        except Exception as e:
-            st.error(f"Error al cargar el plano: {str(e)}")
-    else:
-        st.error(f"❌ No se encontró el plano: {p_sel}")
+
+            except Exception as e:
+                st.error(f"Error al cargar el plano: {str(e)}")
+        else:
+            st.error(f"❌ No se encontró el plano: {p_sel}")
 
     # --- CÓDIGO DE PERSONALIZACIÓN (que estaba en el segundo bloque with t2) ---
     st.divider()
@@ -1183,7 +1183,6 @@ with t2:
     if tf.exists():
         with open(tf,"rb") as f: 
             st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True, key=f"dl_{fmt_sel}")
-    # -----------------------------------------------------------
     # T3: INFORMES
     # -----------------------------------------------------------
     with t3:
