@@ -925,7 +925,7 @@ elif menu == "Administrador":
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
-    with t2:
+with t2:
         st.info("Editor de Zonas")
         zonas = load_zones()
         c1, c2 = st.columns(2)
@@ -937,37 +937,41 @@ elif menu == "Administrador":
         p_sel = c1.selectbox("Piso", pisos_list); d_sel = c2.selectbox("Día Ref.", ORDER_DIAS)
         p_num = p_sel.replace("Piso ", "").strip()
         
-        # --- CÓDIGO CORREGIDO PARA LA CARGA DEL PLANO ---
-        
-        # 1. Búsqueda de Archivo (Sin Espacio)
-        file_base = f"piso{p_num}" # Genera 'piso2'
-        
-        # Búsqueda rigurosa de las tres opciones de capitalización/extensión
+        # 1. Búsqueda de Archivo
+        file_base = f"piso{p_num}" 
         pim = PLANOS_DIR / f"{file_base}.png"
         if not pim.exists(): 
             pim = PLANOS_DIR / f"{file_base}.jpg"
-        if not pim.exists(): # Fallback a P mayúscula
+        if not pim.exists(): 
             pim = PLANOS_DIR / f"Piso{p_num}.png"
             
-        
         if pim.exists():
-            # Limpiamos la indentación y usamos la conversión Base64
+            # CORRECCIÓN 1: Usar directamente el objeto PIL Image para el canvas
             img = PILImage.open(pim)
+            
+            # Cálculo de dimensiones para ajustar al ancho de columna
+            cw = 800
+            w, h = img.size
+            # Si la imagen es muy ancha, la escalamos visualmente
+            if w > cw:
+                ch = int(h * (cw / w))
+                cw = 800
+            else:
+                ch = h
+                cw = w
 
-            # 1. Conversión
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/png;base64,{img_str}" # La URL que el navegador sí entiende
-
-            # 2. Cálculo de dimensiones
-            cw = 800; w, h = img.size
-            ch = int(h * (cw/w)) if w>cw else h
-            cw = w if w<=cw else cw
-
-            # 3. Llamada al Canvas con la URL
-            canvas = st_canvas( fill_color="rgba(0, 160, 74, 0.3)", stroke_width=2, stroke_color="#00A04A", background_image=img_url, update_streamlit=True, width=cw, height=ch, drawing_mode="rect", key=f"cv_{p_sel}" )
-            # --- FIN DEL CÓDIGO DE CONVERSIÓN ---
+            # Llamada al Canvas pasando 'img' directamente (NO img_url)
+            canvas = st_canvas(
+                fill_color="rgba(0, 160, 74, 0.3)",
+                stroke_width=2,
+                stroke_color="#00A04A",
+                background_image=img,  # <--- AQUÍ ESTABA EL ERROR DEL ATTRIBUTE ERROR
+                update_streamlit=True,
+                width=cw,
+                height=ch,
+                drawing_mode="rect",
+                key=f"cv_{p_sel}"
+            )
         
             current_seats_dict = {}
             eqs = [""]
@@ -982,39 +986,37 @@ elif menu == "Administrador":
             elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
             eqs = eqs + salas_piso
 
-            c1, c2, c3 = st.columns([2,1,1])
-            tn = c1.selectbox("Equipo / Sala", eqs); tc = c2.color_picker("Color", "#00A04A")
-            if tn and tn in current_seats_dict: st.info(f"Cupos: {current_seats_dict[tn]}")
-            
-# Selección e info
-c1, c2, c3 = st.columns([2, 1, 1])
-tn = c1.selectbox("Equipo / Sala", eqs)
-tc = c2.color_picker("Color", "#00A04A")
+            # Selección e info (DENTRO DEL IF)
+            c1, c2, c3 = st.columns([2, 1, 1])
+            tn = c1.selectbox("Equipo / Sala", eqs)
+            tc = c2.color_picker("Color", "#00A04A")
 
-if tn and tn in current_seats_dict:
-    st.info(f"Cupos: {current_seats_dict[tn]}")
+            if tn and tn in current_seats_dict:
+                st.info(f"Cupos: {current_seats_dict[tn]}")
 
-# Guardar última figura dibujada en el canvas
-if c3.button("Guardar", key="sz"):
-    # Verifica que haya algún objeto dibujado
-    if tn and canvas.json_data and canvas.json_data.get("objects"):
-        o = canvas.json_data["objects"][-1]  # último rectángulo dibujado
+            # Guardar última figura dibujada en el canvas
+            if c3.button("Guardar", key="sz"):
+                if tn and canvas.json_data and canvas.json_data.get("objects"):
+                    o = canvas.json_data["objects"][-1]
+                    zonas.setdefault(p_sel, []).append({
+                        "team": tn,
+                        "x": int(o.get("left", 0)),
+                        "y": int(o.get("top", 0)),
+                        "w": int(o.get("width", 0) * o.get("scaleX", 1)),
+                        "h": int(o.get("height", 0) * o.get("scaleY", 1)),
+                        "color": tc
+                    })
+                    save_zones(zonas)
+                    st.success("OK")
+                else:
+                    st.warning("No hay figura dibujada o no seleccionaste equipo.")
+        else:
+            st.warning(f"No se encontró el plano: {pim}")
 
-        zonas.setdefault(p_sel, []).append({
-            "team": tn,
-            "x": int(o.get("left", 0)),
-            "y": int(o.get("top", 0)),
-            "w": int(o.get("width", 0) * o.get("scaleX", 1)),
-            "h": int(o.get("height", 0) * o.get("scaleY", 1)),
-            "color": tc
-        })
-
-        save_zones(zonas)
-        st.success("OK")
-    else:
-        st.warning("No hay figura dibujada o no seleccionaste equipo/sala.")
-
-st.divider()
+        # --- CORRECCIÓN 2: BORRADO EL CÓDIGO DUPLICADO QUE ESTABA AQUÍ ABAJO ---
+        
+        st.divider()
+        # ... (El resto del código de borrado de zonas y personalización sigue igual)
 
 # Listado y eliminación de zonas guardadas
 if p_sel in zonas:
