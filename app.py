@@ -1001,7 +1001,7 @@ with t2:
                 display_width = original_width
                 display_height = original_height
 
-            # SOLUCIÓN DEFINITIVA: Canvas con imagen base64 PERO bien formateada
+            # SOLUCIÓN DEFINITIVA: Canvas con imagen base64
             import base64
             from io import BytesIO
             
@@ -1013,7 +1013,7 @@ with t2:
             img_display.save(buffered, format="PNG")
             img_base64 = base64.b64encode(buffered.getvalue()).decode()
             
-            # Canvas con la imagen como fondo - FORMA CORRECTA
+            # Canvas con la imagen como fondo
             canvas_result = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=3,
@@ -1098,103 +1098,91 @@ with t2:
     else:
         st.error(f"❌ No se encontró el plano: {p_sel}")
 
-    # El resto del código de personalización se mantiene igual...
-    # El resto del código de personalización (títulos, leyenda, etc.) se mantiene igual
-    # ... [mantener el código existente de personalización aquí]
-    # ... el resto del código del editor visual se mantiene igual ...
-        # Listado y eliminación de zonas guardadas
-        if p_sel in zonas:
-            for i, z in enumerate(zonas[p_sel]):
-                c1, c2 = st.columns([4, 1])
-                c1.markdown(
-                    f"<span style='color:{z['color']}'>■</span> {z['team']}",
-                    unsafe_allow_html=True
-                )
-                if c2.button("X", key=f"d{i}"):
-                    zonas[p_sel].pop(i)
-                    save_zones(zonas)
-                    st.rerun()
-
-        st.divider()
-        st.subheader("Personalización Título y Leyenda")
-        with st.expander("🎨 Editar Estilos", expanded=True):
-            tm = st.text_input("Título Principal", f"Distribución {p_sel}", key="titulo_principal")
-            ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}", key="subtitulo")
-            
-            align_options = ["Izquierda", "Centro", "Derecha"]
-
-            st.markdown("##### Estilos del Título Principal")
-            cf1, cf2, cf3 = st.columns(3)
-            ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_t")
-            fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key="size_t")
-            align = cf3.selectbox("Alineación (Título)", align_options, index=1, key="align_t")
-
-            st.markdown("---")
-            st.markdown("##### Estilos del Subtítulo")
-            cs1, cs2, cs3 = st.columns(3)
-            ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_s")
-            fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key="size_s")
-            align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1, key="align_s")
-
-            st.markdown("---")
-            st.markdown("##### Estilos de la Leyenda")
-            cl1, cl2, cl3 = st.columns(3)
-            ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_l", index=0)
-            fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key="size_l")
-            align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0, key="align_l")
-            
-            st.markdown("---")
-            cg1, cg2, cg3, cg4 = st.columns(4) 
-            lg = cg1.checkbox("Logo", True, key="chk_logo"); 
-            ln = cg2.checkbox("Mostrar Leyenda", True, key="chk_legend");
-            align_logo = cg3.selectbox("Alineación Logo", align_options, index=0, key="align_logo")
-            lw = cg4.slider("Ancho Logo", 50, 300, 150, key="logo_width")
-            
-            cc1, cc2 = st.columns(2)
-            bg = cc1.color_picker("Fondo Header", "#FFFFFF", key="bg_color"); tx = cc2.color_picker("Color Texto", "#000000", key="text_color")
-
-        fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"], key="formato_salida")
-        f_code = "PNG" if "PNG" in fmt_sel else "PDF"
+    # --- CÓDIGO DE PERSONALIZACIÓN (que estaba en el segundo bloque with t2) ---
+    st.divider()
+    st.subheader("Personalización Título y Leyenda")
+    
+    with st.expander("🎨 Editar Estilos", expanded=True):
+        tm = st.text_input("Título Principal", f"Distribución {p_sel}", key="titulo_principal")
+        ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}", key="subtitulo")
         
-        if st.button("🎨 Actualizar Vista Previa", key="actualizar_vista"):
-            conf = {
-                "title_text": tm,
-                "subtitle_text": ts,
-                "title_font": ff_t,
-                "title_size": fs_t,
-                "subtitle_font": ff_s,
-                "subtitle_size": fs_s,
-                "legend_font": ff_l,
-                "legend_size": fs_l,
-                "alignment": align, 
-                "subtitle_align": align_s, 
-                "legend_align": align_l, 
-                "bg_color": bg, 
-                "title_color": tx, 
-                "subtitle_color": "#666666", 
-                "use_logo": lg, 
-                "use_legend": ln, 
-                "logo_width": lw,
-                "logo_align": align_logo
-            }
-            # CAMBIO: Guardar config en session_state para usarla en dossier PDF
-            st.session_state['last_style_config'] = conf
-            
-            out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
-            if out: st.success("Generado.")
-        
-        ds = d_sel.lower().replace("é","e").replace("á","a")
-        fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
-        fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
-        
-        if fpng.exists(): st.image(str(fpng), width=550, caption="Vista Previa")
-        elif fpdf.exists(): st.info("PDF generado (sin vista previa)")
-        
-        tf = fpng if "PNG" in fmt_sel else fpdf
-        mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
-        if tf.exists():
-            with open(tf,"rb") as f: st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True, key=f"dl_{fmt_sel}")
+        align_options = ["Izquierda", "Centro", "Derecha"]
 
+        st.markdown("##### Estilos del Título Principal")
+        cf1, cf2, cf3 = st.columns(3)
+        ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_t")
+        fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key="size_t")
+        align = cf3.selectbox("Alineación (Título)", align_options, index=1, key="align_t")
+
+        st.markdown("---")
+        st.markdown("##### Estilos del Subtítulo")
+        cs1, cs2, cs3 = st.columns(3)
+        ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_s")
+        fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key="size_s")
+        align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1, key="align_s")
+
+        st.markdown("---")
+        st.markdown("##### Estilos de la Leyenda")
+        cl1, cl2, cl3 = st.columns(3)
+        ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key="font_l", index=0)
+        fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key="size_l")
+        align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0, key="align_l")
+        
+        st.markdown("---")
+        cg1, cg2, cg3, cg4 = st.columns(4) 
+        lg = cg1.checkbox("Logo", True, key="chk_logo")
+        ln = cg2.checkbox("Mostrar Leyenda", True, key="chk_legend")
+        align_logo = cg3.selectbox("Alineación Logo", align_options, index=0, key="align_logo")
+        lw = cg4.slider("Ancho Logo", 50, 300, 150, key="logo_width")
+        
+        cc1, cc2 = st.columns(2)
+        bg = cc1.color_picker("Fondo Header", "#FFFFFF", key="bg_color")
+        tx = cc2.color_picker("Color Texto", "#000000", key="text_color")
+
+    fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"], key="formato_salida")
+    f_code = "PNG" if "PNG" in fmt_sel else "PDF"
+    
+    if st.button("🎨 Actualizar Vista Previa", key="actualizar_vista"):
+        conf = {
+            "title_text": tm,
+            "subtitle_text": ts,
+            "title_font": ff_t,
+            "title_size": fs_t,
+            "subtitle_font": ff_s,
+            "subtitle_size": fs_s,
+            "legend_font": ff_l,
+            "legend_size": fs_l,
+            "alignment": align, 
+            "subtitle_align": align_s, 
+            "legend_align": align_l, 
+            "bg_color": bg, 
+            "title_color": tx, 
+            "subtitle_color": "#666666", 
+            "use_logo": lg, 
+            "use_legend": ln, 
+            "logo_width": lw,
+            "logo_align": align_logo
+        }
+        st.session_state['last_style_config'] = conf
+        
+        out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
+        if out: 
+            st.success("Generado.")
+    
+    ds = d_sel.lower().replace("é","e").replace("á","a")
+    fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+    fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
+    
+    if fpng.exists(): 
+        st.image(str(fpng), width=550, caption="Vista Previa")
+    elif fpdf.exists(): 
+        st.info("PDF generado (sin vista previa)")
+    
+    tf = fpng if "PNG" in fmt_sel else fpdf
+    mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
+    if tf.exists():
+        with open(tf,"rb") as f: 
+            st.download_button(f"Descargar {fmt_sel}", f, tf.name, mm, use_container_width=True, key=f"dl_{fmt_sel}")
     # -----------------------------------------------------------
     # T3: INFORMES
     # -----------------------------------------------------------
