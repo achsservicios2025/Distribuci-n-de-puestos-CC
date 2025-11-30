@@ -982,10 +982,6 @@ elif menu == "Administrador":
             
             # Preparar imagen del plano
             img = PILImage.open(pim)
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/png;base64,{img_str}"
             
             # Cálculo de dimensiones
             cw = 800; w, h = img.size
@@ -1020,12 +1016,12 @@ elif menu == "Administrador":
                 # Convertir color a rgba para fill_color
                 fill_rgba = hex_to_rgba(tc, 0.3)
 
-                # Llamada al Canvas con la URL y color dinámico
+                # Llamada al Canvas con el objeto PIL Image y color dinámico
                 canvas = st_canvas(
                     fill_color=fill_rgba,
                     stroke_width=2,
                     stroke_color=tc,
-                    background_image=img_url,
+                    background_image=img,
                     update_streamlit=True,
                     width=cw,
                     height=ch,
