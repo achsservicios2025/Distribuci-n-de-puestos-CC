@@ -852,9 +852,14 @@ site_title = settings.get("site_title", "Gestor de Puestos y Salas — ACHS Serv
 global_logo_path = settings.get("logo_path", "static/logo.png")
 
 if os.path.exists(global_logo_path):
-    c1, c2 = st.columns([1, 5])
-    c1.image(global_logo_path, width=150)
-    c2.title(site_title)
+    try:
+        c1, c2 = st.columns([1, 5])
+        c1.image(global_logo_path, width=150, use_container_width=False)
+        c2.title(site_title)
+    except Exception as e:
+        # Si hay error al cargar el logo, mostrar solo el título
+        st.title(site_title)
+        st.warning(f"⚠️ No se pudo cargar el logo: {str(e)}")
 else:
     st.title(site_title)
 
@@ -1358,7 +1363,8 @@ elif menu == "Administrador":
                 pim = PLANOS_DIR / f"{file_base}.jpg"
             if not pim.exists():
                 pim = PLANOS_DIR / f"Piso{p_num}.png"
-                
+            
+            if pim.exists():
                 try:
                     # Cargar zonas existentes para este piso
                     existing_zones = zonas.get(p_sel, [])
@@ -1374,6 +1380,7 @@ elif menu == "Administrador":
                         st.rerun()
                     
                     # Mostrar componente de dibujo mejorado
+                    st.markdown("### 🎨 Herramientas de Dibujo")
                     drawing_component = create_enhanced_drawing_component(
                         str(pim), 
                         existing_zones, 
@@ -1381,6 +1388,9 @@ elif menu == "Administrador":
                         selected_color=selected_color,
                         width=600
                     )
+                    
+                    if drawing_component is None:
+                        st.error("❌ No se pudo cargar el componente de dibujo")
                     
                     # Mostrar información actual
                     if selected_team:
@@ -1763,5 +1773,7 @@ elif menu == "Administrador":
     with t5: admin_appearance_ui(conn)
     
     with t6:
-        opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
-        if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
+        opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"], key="delete_option")
+        if st.button("BORRAR", type="primary", key="delete_button"): 
+            msg = perform_granular_delete(conn, opt)
+            st.success(msg)
