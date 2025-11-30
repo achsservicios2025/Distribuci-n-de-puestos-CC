@@ -21,6 +21,12 @@ import base64
 # NOTA: ESTE PARCHE ES EL QUE PERMITE QUE PIL IMAGE FUNCIONE EN EL CANVAS
 import streamlit.elements.lib.image_utils
 
+if 'canvas_key' not in st.session_state:
+    st.session_state.canvas_key = 0
+
+# Y en el canvas key:
+key=f"canvas_{p_sel}_{d_sel}_{st.session_state.canvas_key}"
+
 if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
     _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
 
@@ -971,57 +977,58 @@ with t2:
     d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
     p_num = p_sel.replace("Piso ", "").strip()
     
-    # 1. Búsqueda de Archivo (Usando la lógica flexible)
+    # 1. Búsqueda de Archivo
     file_base = f"piso{p_num}" 
-    pim = PLANOS_DIR / f"{file_base}.png" 
-    if not pim.exists(): 
-        pim = PLANOS_DIR / f"piso {p_num}.png"
+    pim = PLANOS_DIR / f"{file_base}.png"
     if not pim.exists(): 
         pim = PLANOS_DIR / f"{file_base}.jpg"
     if not pim.exists(): 
         pim = PLANOS_DIR / f"Piso{p_num}.png"
-            
+        
     if pim.exists():
         try:
-            # Cargar imagen y redimensionar (PREPARACIÓN PARA EL CANVAS)
+            # Cargar y preparar imagen
             img = PILImage.open(pim)
-            w, h = img.size
+            original_width, original_height = img.size
+            
+            # Redimensionar para el canvas
             max_display_width = 700
-            
-            if w > max_display_width:
-                ratio = max_display_width / w
-                new_h = int(h * ratio)
-                img_display = img.resize((max_display_width, new_h), PILImage.Resampling.LANCZOS)
+            if original_width > max_display_width:
+                ratio = max_display_width / original_width
+                display_height = int(original_height * ratio)
+                display_width = max_display_width
             else:
-                img_display = img
-                max_display_width = w
-                new_h = h
+                display_width = original_width
+                display_height = original_height
+
+            # SOLUCIÓN DEFINITIVA: Canvas con imagen base64 PERO bien formateada
+            import base64
+            from io import BytesIO
             
-            st.markdown("---")
-            st.subheader("Editor de Zonas - Dibuja directamente en el plano")
+            # Redimensionar imagen para el canvas
+            img_display = img.resize((display_width, display_height), PILImage.Resampling.LANCZOS)
             
-            # 🖼️ CANVAS CON IMAGEN DE FONDO (Permite dibujar sobre el mapa)
+            # Convertir a base64 CORRECTAMENTE
+            buffered = BytesIO()
+            img_display.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            # Canvas con la imagen como fondo - FORMA CORRECTA
             canvas_result = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=3,
-                stroke_color="#00A04A",
-                background_image=img_display, # ← PASAMOS EL OBJETO PIL REDIMENSIONADO
+                stroke_color="#00A04A", 
+                background_image=f"data:image/png;base64,{img_base64}",
                 update_streamlit=True,
-                width=max_display_width,
-                height=new_h,
+                width=display_width,
+                height=display_height,
                 drawing_mode="rect",
                 key=f"canvas_{p_sel}_{d_sel}",
             )
-
-            # Información para el usuario sobre cómo usar
-            st.warning("""
-            **Para usar el editor:**
-            1. Selecciona un equipo/sala en el dropdown de abajo
-            2. Elige un color
-            3. Dibuja un rectángulo en el área blanca de arriba (que representa tu plano)
-            4. Haz clic en 'Guardar Zona'
-            """)
             
+            st.info("💡 **Instrucciones:** Dibuja rectángulos sobre las áreas del plano donde quieras asignar equipos")
+            
+            # Configuración de zonas
             current_seats_dict = {}
             eqs = [""]
             if not df_d.empty:
@@ -1035,7 +1042,7 @@ with t2:
             elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
             eqs = eqs + salas_piso
 
-            # Selección e info
+            # Selección de equipo y color
             st.markdown("---")
             st.subheader("Configurar Zona")
             c1, c2, c3 = st.columns([2, 1, 1])
@@ -1045,18 +1052,20 @@ with t2:
             if tn and tn in current_seats_dict:
                 st.info(f"Cupos: {current_seats_dict[tn]}")
 
-            # Guardar última figura dibujada en el canvas
+            # Guardar zona dibujada
             if c3.button("💾 Guardar Zona", type="primary", key="guardar_zona"):
                 if tn and canvas_result.json_data and canvas_result.json_data.get("objects"):
+                    # Tomar el último rectángulo dibujado
                     o = canvas_result.json_data["objects"][-1]
-                    # Calcular posición relativa basada en el tamaño de la imagen original
-                    scale_x = w / max_display_width if w > max_display_width else 1
-                    scale_y = h / new_h if h > new_h else 1
+                    
+                    # Convertir coordenadas del canvas a coordenadas de la imagen original
+                    scale_x = original_width / display_width
+                    scale_y = original_height / display_height
                     
                     zonas.setdefault(p_sel, []).append({
                         "team": tn,
                         "x": int(o.get("left", 0) * scale_x),
-                        "y": int(o.get("top", 0) * scale_y),
+                        "y": int(o.get("top", 0) * scale_y), 
                         "w": int(o.get("width", 0) * o.get("scaleX", 1) * scale_x),
                         "h": int(o.get("height", 0) * o.get("scaleY", 1) * scale_y),
                         "color": tc
@@ -1086,10 +1095,10 @@ with t2:
                     
         except Exception as e:
             st.error(f"Error al cargar el plano: {str(e)}")
-            st.code("Si este error persiste, su librería 'streamlit-drawable-canvas' es incompatible. Debe intentar desinstalar 'streamlit-drawable-canvas-fix' y reinstalar la versión base.")
     else:
-        st.error(f"❌ No se encontró el plano: {p_sel}. Busqué el archivo: {pim}")   
+        st.error(f"❌ No se encontró el plano: {p_sel}")
 
+    # El resto del código de personalización se mantiene igual...
     # El resto del código de personalización (títulos, leyenda, etc.) se mantiene igual
     # ... [mantener el código existente de personalización aquí]
     # ... el resto del código del editor visual se mantiene igual ...
