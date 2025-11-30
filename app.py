@@ -1485,14 +1485,6 @@ elif menu == "Administrador":
                         label_visibility="collapsed"
                     )
                     
-                    # Campo oculto para recibir datos del componente (completamente invisible)
-                    zones_json_hidden = st.text_input(
-                        "",
-                        value=json.dumps(existing_zones),
-                        key=f"zones_json_hidden_{p_sel}",
-                        label_visibility="collapsed"
-                    )
-                    
                     # Procesar guardado automático cuando cambia el campo oculto
                     try:
                         zones_data = json.loads(zones_json_hidden)
