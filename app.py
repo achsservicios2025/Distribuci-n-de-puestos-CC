@@ -1765,6 +1765,3 @@ elif menu == "Administrador":
     with t6:
         opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"])
         if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
-
-
-        if st.button("BORRAR", type="primary"): msg = perform_granular_delete(conn, opt); st.success(msg)
