@@ -925,12 +925,14 @@ elif menu == "Administrador":
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
-with t2:
+# -----------------------------------------------------------
+    # T2: EDITOR VISUAL (CORREGIDO Y BLINDADO)
+    # -----------------------------------------------------------
+    with t2:
         st.info("Editor de Zonas")
         zonas = load_zones()
         c1, c2 = st.columns(2)
         
-        # MODIFICADO: Leer con funcion importada
         df_d = read_distribution_df(conn)
         pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
         
@@ -946,29 +948,35 @@ with t2:
             pim = PLANOS_DIR / f"Piso{p_num}.png"
             
         if pim.exists():
-            # CORRECCIÓN 1: Usar directamente el objeto PIL Image para el canvas
+            # A. Cargar imagen como objeto PIL para calcular dimensiones
             img = PILImage.open(pim)
-            
-            # Cálculo de dimensiones para ajustar al ancho de columna
-            cw = 800
             w, h = img.size
-            # Si la imagen es muy ancha, la escalamos visualmente
+            
+            # B. Calcular dimensiones visuales (ajuste de ancho)
+            cw = 800
             if w > cw:
                 ch = int(h * (cw / w))
-                cw = 800
             else:
-                ch = h
                 cw = w
+                ch = h
 
-            # Llamada al Canvas pasando 'img' directamente (NO img_url)
+            # C. Convertir a Base64 MANUALMENTE (Esto evita el error image_to_url)
+            import base64
+            from io import BytesIO
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            img_url = f"data:image/png;base64,{img_str}"
+
+            # D. Llamada al Canvas usando la URL generada y las dimensiones calculadas
             canvas = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=2,
                 stroke_color="#00A04A",
-                background_image=img,  # <--- AQUÍ ESTABA EL ERROR DEL ATTRIBUTE ERROR
+                background_image=img_url,  # Usamos la cadena Base64
                 update_streamlit=True,
-                width=cw,
-                height=ch,
+                width=cw,                  # Usamos enteros calculados
+                height=ch,                 # Usamos enteros calculados
                 drawing_mode="rect",
                 key=f"cv_{p_sel}"
             )
@@ -986,7 +994,7 @@ with t2:
             elif "3" in p_sel: salas_piso = ["Sala Reuniones - Piso 3"]
             eqs = eqs + salas_piso
 
-            # Selección e info (DENTRO DEL IF)
+            # Selección e info
             c1, c2, c3 = st.columns([2, 1, 1])
             tn = c1.selectbox("Equipo / Sala", eqs)
             tc = c2.color_picker("Color", "#00A04A")
@@ -994,16 +1002,25 @@ with t2:
             if tn and tn in current_seats_dict:
                 st.info(f"Cupos: {current_seats_dict[tn]}")
 
-            # Guardar última figura dibujada en el canvas
+            # Guardar
             if c3.button("Guardar", key="sz"):
                 if tn and canvas.json_data and canvas.json_data.get("objects"):
                     o = canvas.json_data["objects"][-1]
+                    # Ajuste de escala si la imagen fue redimensionada
+                    scale_x = w / cw
+                    scale_y = h / ch
+                    
+                    real_x = int(o.get("left", 0) * scale_x)
+                    real_y = int(o.get("top", 0) * scale_y)
+                    real_w = int((o.get("width", 0) * o.get("scaleX", 1)) * scale_x)
+                    real_h = int((o.get("height", 0) * o.get("scaleY", 1)) * scale_y)
+
                     zonas.setdefault(p_sel, []).append({
                         "team": tn,
-                        "x": int(o.get("left", 0)),
-                        "y": int(o.get("top", 0)),
-                        "w": int(o.get("width", 0) * o.get("scaleX", 1)),
-                        "h": int(o.get("height", 0) * o.get("scaleY", 1)),
+                        "x": real_x,
+                        "y": real_y,
+                        "w": real_w,
+                        "h": real_h,
                         "color": tc
                     })
                     save_zones(zonas)
@@ -1013,29 +1030,29 @@ with t2:
         else:
             st.warning(f"No se encontró el plano: {pim}")
 
-        # --- CORRECCIÓN 2: BORRADO EL CÓDIGO DUPLICADO QUE ESTABA AQUÍ ABAJO ---
-        
         st.divider()
-        # ... (El resto del código de borrado de zonas y personalización sigue igual)
+        
+        # Listado y eliminación de zonas (Visualización)
+        if p_sel in zonas:
+            for i, z in enumerate(zonas[p_sel]):
+                c1, c2 = st.columns([4, 1])
+                c1.markdown(
+                    f"<span style='color:{z['color']}'>■</span> {z['team']}",
+                    unsafe_allow_html=True
+                )
+                if c2.button("X", key=f"d{i}"):
+                    zonas[p_sel].pop(i)
+                    save_zones(zonas)
+                    st.rerun()
 
-# Listado y eliminación de zonas guardadas
-if p_sel in zonas:
-    for i, z in enumerate(zonas[p_sel]):
-        c1, c2 = st.columns([4, 1])
-        c1.markdown(
-            f"<span style='color:{z['color']}'>■</span> {z['team']}",
-            unsafe_allow_html=True
-        )
-        if c2.button("X", key=f"d{i}"):
-            zonas[p_sel].pop(i)
-            save_zones(zonas)
-            st.rerun()
-
+            # ... (Aquí sigue el bloque de personalización de Título/Leyenda que ya tenías) ...
+            # ... Mantén el código de personalización de PDF/PNG tal cual estaba ...
             st.divider()
             st.subheader("Personalización Título y Leyenda")
             with st.expander("🎨 Editar Estilos", expanded=True):
+                # (Mantén el resto del código original de esta sección)
                 tm = st.text_input("Título Principal", f"Distribución {p_sel}")
-                ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}")
+                # ... etc ...                ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}")
                 
                 align_options = ["Izquierda", "Centro", "Derecha"]
 
