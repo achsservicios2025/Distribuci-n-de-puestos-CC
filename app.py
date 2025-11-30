@@ -19,33 +19,33 @@ import base64
 # 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
 # ---------------------------------------------------------
 # NOTA: ESTE PARCHE ES EL QUE PERMITE QUE PIL IMAGE FUNCIONE EN EL CANVAS
-#import streamlit.elements.lib.image_utils
+import streamlit.elements.lib.image_utils
 
-#if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
-#    _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
+if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
+    _orig_image_to_url = streamlit.elements.lib.image_utils.image_to_url
 
-#    @dataclass
-#    class WidthConfig:
-#        width: int
+    @dataclass
+    class WidthConfig:
+        width: int
 
-#    def _patched_image_to_url(image_data, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None):
-#        if isinstance(width, int):
-#            width = WidthConfig(width=width)
-#        return _orig_image_to_url(image_data, width, clamp, channels, output_format, image_id)
-#
-#    streamlit.elements.lib.image_utils.image_to_url = _patched_image_to_url
+    def _patched_image_to_url(image_data, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None):
+        if isinstance(width, int):
+            width = WidthConfig(width=width)
+        return _orig_image_to_url(image_data, width, clamp, channels, output_format, image_id)
+
+    streamlit.elements.lib.image_utils.image_to_url = _patched_image_to_url
 
 # ---------------------------------------------------------
 # 2. IMPORTACIONES DE MÓDULOS
 # ---------------------------------------------------------
 from modules.database import (
-    get_conn, init_db, insert_distribution, clear_distribution,
-    read_distribution_df, save_setting, get_all_settings,
-    add_reservation, user_has_reservation, list_reservations_df,
-    add_room_reservation, get_room_reservations_df,
-    count_monthly_free_spots, delete_reservation_from_db, 
-    delete_room_reservation_from_db, perform_granular_delete,
-    ensure_reset_table, save_reset_token, validate_and_consume_token
+get_conn, init_db, insert_distribution, clear_distribution,
+read_distribution_df, save_setting, get_all_settings,
+add_reservation, user_has_reservation, list_reservations_df,
+add_room_reservation, get_room_reservations_df,
+count_monthly_free_spots, delete_reservation_from_db, 
+delete_room_reservation_from_db, perform_granular_delete,
+ensure_reset_table, save_reset_token, validate_and_consume_token
 )
 from modules.auth import get_admin_credentials
 from modules.layout import admin_appearance_ui, apply_appearance_styles
@@ -964,7 +964,6 @@ with t2:
     zonas = load_zones()
     c1, c2 = st.columns(2)
     
-    # MODIFICADO: Leer con funcion importada
     df_d = read_distribution_df(conn)
     pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
     
@@ -972,22 +971,23 @@ with t2:
     d_sel = c2.selectbox("Día Ref.", ORDER_DIAS, key="editor_dia")
     p_num = p_sel.replace("Piso ", "").strip()
     
-    # 1. Búsqueda de Archivo
+    # 1. Búsqueda de Archivo (Usando la lógica flexible)
     file_base = f"piso{p_num}" 
-    pim = PLANOS_DIR / f"{file_base}.png"
+    pim = PLANOS_DIR / f"{file_base}.png" 
+    if not pim.exists(): 
+        pim = PLANOS_DIR / f"piso {p_num}.png"
     if not pim.exists(): 
         pim = PLANOS_DIR / f"{file_base}.jpg"
     if not pim.exists(): 
         pim = PLANOS_DIR / f"Piso{p_num}.png"
-        
+            
     if pim.exists():
         try:
-            # SOLUCIÓN SIMPLIFICADA: Mostrar la imagen y el canvas por separado
+            # Cargar imagen y redimensionar (PREPARACIÓN PARA EL CANVAS)
             img = PILImage.open(pim)
-            
-            # Redimensionar para mostrar
-            max_display_width = 700
             w, h = img.size
+            max_display_width = 700
+            
             if w > max_display_width:
                 ratio = max_display_width / w
                 new_h = int(h * ratio)
@@ -996,27 +996,23 @@ with t2:
                 img_display = img
                 max_display_width = w
                 new_h = h
-
-            st.image(img_display, caption=f"Plano de {p_sel}", use_container_width=False)
             
             st.markdown("---")
-            st.subheader("Dibuja zonas sobre el plano")
-            st.info("💡 **Instrucciones:** Dibuja rectángulos sobre las áreas del plano donde quieras asignar equipos")
+            st.subheader("Editor de Zonas - Dibuja directamente en el plano")
             
-            # CANVAS SIMPLIFICADO - SIN BACKGROUND_IMAGE PROBLEMÁTICO
-            # Usamos un canvas con fondo blanco y dimensiones fijas
+            # 🖼️ CANVAS CON IMAGEN DE FONDO (Permite dibujar sobre el mapa)
             canvas_result = st_canvas(
                 fill_color="rgba(0, 160, 74, 0.3)",
                 stroke_width=3,
                 stroke_color="#00A04A",
-                background_color="#ffffff",
+                background_image=img_display, # ← PASAMOS EL OBJETO PIL REDIMENSIONADO
                 update_streamlit=True,
                 width=max_display_width,
                 height=new_h,
                 drawing_mode="rect",
                 key=f"canvas_{p_sel}_{d_sel}",
             )
-            
+
             # Información para el usuario sobre cómo usar
             st.warning("""
             **Para usar el editor:**
@@ -1090,10 +1086,9 @@ with t2:
                     
         except Exception as e:
             st.error(f"Error al cargar el plano: {str(e)}")
-            st.code(f"Detalles del error: {str(e)}")
+            st.code("Si este error persiste, su librería 'streamlit-drawable-canvas' es incompatible. Debe intentar desinstalar 'streamlit-drawable-canvas-fix' y reinstalar la versión base.")
     else:
-        st.error(f"❌ No se encontró el plano: {p_sel}")
-        st.info(f"Busqué en: {pim}")
+        st.error(f"❌ No se encontró el plano: {p_sel}. Busqué el archivo: {pim}")   
 
     # El resto del código de personalización (títulos, leyenda, etc.) se mantiene igual
     # ... [mantener el código existente de personalización aquí]
