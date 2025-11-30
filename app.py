@@ -482,7 +482,7 @@ else:
 
 
 def create_drawing_component(img_path, existing_zones, width=700):
-    """Componente profesional de dibujo integrado con la app"""
+    """Componente profesional de dibujo - VERSIÓN CORREGIDA"""
     
     try:
         # Convertir imagen a base64
@@ -504,7 +504,7 @@ def create_drawing_component(img_path, existing_zones, width=700):
         
         existing_zones_json = json.dumps(safe_zones)
         
-        # HTML/JS Componente de dibujo profesional
+        # HTML/JS Componente de dibujo profesional CORREGIDO
         html_code = f'''
         <!DOCTYPE html>
         <html>
@@ -559,11 +559,14 @@ def create_drawing_component(img_path, existing_zones, width=700):
                 .canvas-container {{
                     position: relative;
                     background: white;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
                 }}
                 #drawingCanvas {{
                     display: block;
                     cursor: crosshair;
-                    max-width: 100%;
+                    border: 1px solid #ccc;
                 }}
                 .status-panel {{
                     padding: 15px 20px;
@@ -598,7 +601,7 @@ def create_drawing_component(img_path, existing_zones, width=700):
         </head>
         <body>
             <div class="editor-container">
-                <h2 class="editor-header">🎨 Editor de Planos Profesional</h2>
+                <h2 class="editor-header">🎨 Editor de Planos - PRECISIÓN MEJORADA</h2>
                 
                 <div class="editor-controls">
                     <button class="control-btn" onclick="startDrawing()">
@@ -616,7 +619,7 @@ def create_drawing_component(img_path, existing_zones, width=700):
                 </div>
 
                 <div class="canvas-container">
-                    <canvas id="drawingCanvas" width="{width}" height="500"></canvas>
+                    <canvas id="drawingCanvas"></canvas>
                 </div>
 
                 <div class="status-panel">
@@ -641,9 +644,19 @@ def create_drawing_component(img_path, existing_zones, width=700):
                 let startX, startY, currentX, currentY;
                 let rectangles = {existing_zones_json};
                 let currentRect = null;
+                let canvasWidth = {width};
+                let canvasHeight = 0;
 
-                // Cargar imagen y zonas existentes
+                // CORRECCIÓN PRINCIPAL: Calcular dimensiones del canvas cuando la imagen cargue
                 img.onload = function() {{
+                    // Calcular altura manteniendo la proporción de la imagen
+                    const aspectRatio = img.naturalHeight / img.naturalWidth;
+                    canvasHeight = Math.round(canvasWidth * aspectRatio);
+                    
+                    // Establecer dimensiones del canvas
+                    canvas.width = canvasWidth;
+                    canvas.height = canvasHeight;
+                    
                     drawImageAndZones();
                 }};
 
@@ -651,7 +664,7 @@ def create_drawing_component(img_path, existing_zones, width=700):
                     // Limpiar canvas
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
-                    // Dibujar imagen de fondo
+                    // Dibujar imagen de fondo ESCALADA CORRECTAMENTE
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                     
                     // Dibujar rectángulo actual (si está en proceso)
@@ -659,15 +672,28 @@ def create_drawing_component(img_path, existing_zones, width=700):
                         drawRectangle(currentRect);
                     }}
                     
-                    // Dibujar zonas existentes
+                    // Dibujar zonas existentes (convertidas a coordenadas del canvas)
                     rectangles.forEach(rect => {{
-                        drawRectangle(rect);
+                        // Convertir coordenadas originales a coordenadas del canvas
+                        const scaleX = canvas.width / img.naturalWidth;
+                        const scaleY = canvas.height / img.naturalHeight;
+                        
+                        const canvasRect = {{
+                            x: rect.x * scaleX,
+                            y: rect.y * scaleY,
+                            w: rect.w * scaleX,
+                            h: rect.h * scaleY,
+                            color: rect.color,
+                            team: rect.team
+                        }};
+                        
+                        drawRectangle(canvasRect);
                         
                         // Dibujar etiqueta
                         if (rect.team && rect.team !== 'Nueva Zona') {{
                             ctx.fillStyle = '#000';
-                            ctx.font = 'bold 14px Arial';
-                            ctx.fillText(rect.team, rect.x + 5, rect.y + 20);
+                            ctx.font = 'bold 12px Arial';
+                            ctx.fillText(rect.team, canvasRect.x + 5, canvasRect.y + 15);
                         }}
                     }});
                 }}
@@ -688,13 +714,24 @@ def create_drawing_component(img_path, existing_zones, width=700):
                     showStatus('🎯 Modo dibujo activado: Haz clic y arrastra para dibujar un rectángulo', 'success');
                 }}
 
-                // Eventos del mouse
+                // CORRECCIÓN: Obtener coordenadas relativas al canvas correctamente
+                function getCanvasCoordinates(e) {{
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    
+                    return {{
+                        x: (e.clientX - rect.left) * scaleX,
+                        y: (e.clientY - rect.top) * scaleY
+                    }};
+                }}
+
                 canvas.addEventListener('mousedown', function(e) {{
                     if (!isDrawing) return;
                     
-                    const rect = canvas.getBoundingClientRect();
-                    startX = e.clientX - rect.left;
-                    startY = e.clientY - rect.top;
+                    const coords = getCanvasCoordinates(e);
+                    startX = coords.x;
+                    startY = coords.y;
                     
                     currentRect = {{
                         x: startX, y: startY, w: 0, h: 0,
@@ -705,9 +742,9 @@ def create_drawing_component(img_path, existing_zones, width=700):
                 canvas.addEventListener('mousemove', function(e) {{
                     if (!isDrawing || !currentRect) return;
                     
-                    const rect = canvas.getBoundingClientRect();
-                    currentX = e.clientX - rect.left;
-                    currentY = e.clientY - rect.top;
+                    const coords = getCanvasCoordinates(e);
+                    currentX = coords.x;
+                    currentY = coords.y;
                     
                     currentRect.w = currentX - startX;
                     currentRect.h = currentY - startY;
@@ -725,7 +762,7 @@ def create_drawing_component(img_path, existing_zones, width=700):
                     
                     // Solo guardar si el rectángulo tiene tamaño suficiente
                     if (Math.abs(currentRect.w) > 10 && Math.abs(currentRect.h) > 10) {{
-                        // Escalar a coordenadas originales de la imagen
+                        // CORRECCIÓN: Convertir a coordenadas originales de la imagen
                         const scaleX = img.naturalWidth / canvas.width;
                         const scaleY = img.naturalHeight / canvas.height;
                         
@@ -787,13 +824,11 @@ def create_drawing_component(img_path, existing_zones, width=700):
 
                 // Mostrar coordenadas al mover el mouse
                 canvas.addEventListener('mousemove', function(e) {{
-                    const rect = canvas.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const y = e.clientY - rect.top;
+                    const coords = getCanvasCoordinates(e);
                     
                     if (!isDrawing) {{
                         document.getElementById('coordsDisplay').textContent = 
-                            `X: ${{Math.round(x)}}, Y: ${{Math.round(y)}}`;
+                            `X: ${{Math.round(coords.x)}}, Y: ${{Math.round(coords.y)}}`;
                     }}
                 }});
             </script>
@@ -801,12 +836,11 @@ def create_drawing_component(img_path, existing_zones, width=700):
         </html>
         '''
         
-        return components.html(html_code, width=width + 100, height=700, scrolling=False)
+        return components.html(html_code, width=canvasWidth + 50, height=800, scrolling=False)
         
     except Exception as e:
         st.error(f"Error al crear el componente de dibujo: {str(e)}")
         return None
-
 # ---------------------------------------------------------
 # MENÚ PRINCIPAL
 # ---------------------------------------------------------
