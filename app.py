@@ -806,20 +806,24 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             weekly_stats = distrib_df.groupby(col_equipo)[col_cupos].sum().reset_index()
             weekly_stats.columns = ["Equipo", "Total Semanal"]
             
-            # Calcular porcentaje de distribución semanal
-            total_cupos_semana = weekly_stats["Total Semanal"].sum()
-            if total_cupos_semana > 0:
-                weekly_stats["% Distr Semanal"] = (weekly_stats["Total Semanal"] / total_cupos_semana * 100).round(2)
-            else:
-                weekly_stats["% Distr Semanal"] = 0
+            # Calcular promedio semanal por equipo (sobre 5 días hábiles)
+            dias_habiles = len(ORDER_DIAS)
+            weekly_stats["Promedio Cupo Semanal"] = (weekly_stats["Total Semanal"] / max(dias_habiles, 1)).round(2)
             
-            # Ordenar por total semanal descendente
-            weekly_stats = weekly_stats.sort_values("Total Semanal", ascending=False)
+            # Calcular porcentaje de uso semanal basado en el promedio
+            suma_promedios = weekly_stats["Promedio Cupo Semanal"].sum()
+            if suma_promedios > 0:
+                weekly_stats["% Uso Semanal"] = (weekly_stats["Promedio Cupo Semanal"] / suma_promedios * 100).round(2)
+            else:
+                weekly_stats["% Uso Semanal"] = 0
+            
+            # Ordenar por promedio descendente
+            weekly_stats = weekly_stats.sort_values("Promedio Cupo Semanal", ascending=False)
             
             # Dibujar Tabla Semanal
             pdf.set_font("Arial", 'B', 9)
-            w_wk = [80, 40, 40]
-            h_wk = ["Equipo", "Total Semanal", "% Distr Semanal"]
+            w_wk = [80, 50, 40]
+            h_wk = ["Equipo", "Promedio Cupo Semanal", "% Uso Semanal"]
             
             # Centrar un poco la tabla
             start_x = 25
@@ -831,8 +835,8 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             for _, row in weekly_stats.iterrows():
                 pdf.set_x(start_x)
                 pdf.cell(w_wk[0], 6, clean_pdf_text(str(row["Equipo"])[:40]), 1)
-                pdf.cell(w_wk[1], 6, clean_pdf_text(str(int(row["Total Semanal"]))), 1)
-                pdf.cell(w_wk[2], 6, clean_pdf_text(f"{row['% Distr Semanal']:.2f}%"), 1)
+                pdf.cell(w_wk[1], 6, clean_pdf_text(str(row["Promedio Cupo Semanal"])), 1)
+                pdf.cell(w_wk[2], 6, clean_pdf_text(f"{row['% Uso Semanal']:.2f}%"), 1)
                 pdf.ln()
     except Exception as e:
         pdf.set_font("Arial", 'I', 9)
@@ -846,13 +850,18 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.set_font("Arial", '', 9)
     notas = [
         "1. % Distribución Diario: Se calcula dividiendo los cupos asignados en un día específico por la dotación total del equipo.",
-        "2. % Uso Semanal: Promedio simple de los porcentajes de ocupación de los 5 días hábiles (Lunes a Viernes).",
-        "3. Cálculo de Déficit: Diferencia entre los cupos mínimos requeridos (según reglas de presencialidad) y los asignados."
+        "2. Promedio de Cupo Semanal: Suma de los cupos asignados al equipo durante la semana dividida por los 5 días hábiles (Lunes a Viernes).",
+        "3. % Uso Semanal: Proporción del promedio de cupos semanales del equipo respecto de la suma de promedios de todos los equipos.",
+        "4. Cálculo de Déficit: Diferencia entre los cupos mínimos requeridos (según reglas de presencialidad) y los asignados."
     ]
     
     for nota in notas:
         pdf.set_x(10)
         pdf.multi_cell(185, 6, clean_pdf_text(nota))
+
+    pdf.ln(4)
+    pdf.set_font("Arial", 'I', 8)
+    pdf.cell(0, 6, clean_pdf_text(f"Informe generado el {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} hrs"), ln=True, align='R')
 
     # --- PÁGINA 3: DÉFICIT (Si existe) ---
     if deficit_data and len(deficit_data) > 0:
@@ -1034,17 +1043,19 @@ if menu == "Vista pública":
             # MODIFICADO: Fix use_container_width
             st.dataframe(df_view, hide_index=True, width=None, use_container_width=True)
             
-            st.subheader("Calendario Mensual de Reservas por Piso")
+            st.subheader("CALENDARIO DE RESERVA POR PISO FLEX")
             
             # Obtener reservas de cupos libres
             all_res = list_reservations_df(conn)
             
-            # Obtener mes actual o seleccionado
-            mes_actual = datetime.date.today().replace(day=1)
-            mes_sel = st.selectbox("Seleccionar Mes", 
-                                   [mes_actual + datetime.timedelta(days=30*i) for i in range(-2, 4)],
-                                   format_func=lambda x: x.strftime("%B %Y"),
-                                   index=2)
+            # Selección de mes mediante calendario
+            fecha_base = datetime.date.today().replace(day=1)
+            mes_sel_date = st.date_input(
+                "CALENDARIO DE RESERVA POR PISO FLEX",
+                value=fecha_base,
+                key="cal_reserva_piso_flex"
+            )
+            mes_sel = mes_sel_date.replace(day=1)
             
             # Crear calendario por piso
             pisos_cal = sort_floors(pisos_disponibles)
