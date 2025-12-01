@@ -68,7 +68,9 @@ from modules.database import (
     add_room_reservation, get_room_reservations_df,
     count_monthly_free_spots, delete_reservation_from_db, 
     delete_room_reservation_from_db, perform_granular_delete,
-    ensure_reset_table, save_reset_token, validate_and_consume_token
+    ensure_reset_table, save_reset_token, validate_and_consume_token,
+    delete_distribution_row, delete_distribution_rows_by_indices, read_distribution_df,
+    get_worksheet
 )
 from modules.auth import get_admin_credentials
 from modules.layout import admin_appearance_ui, apply_appearance_styles
@@ -2376,39 +2378,51 @@ elif menu == "Administrador":
             df_cupos = list_reservations_df(conn)
             df_salas = get_room_reservations_df(conn)
             
-            b = BytesIO()
-            with pd.ExcelWriter(b, engine='openpyxl') as w:
-                if not df_cupos.empty:
-                    # Por persona - cupos
-                    df_cupos_persona = df_cupos.groupby(['user_name', 'user_email']).agg({
-                        'reservation_date': 'count'
-                    }).reset_index()
-                    df_cupos_persona.columns = ['Nombre', 'Correo', 'Cantidad']
-                    df_cupos_persona = df_cupos_persona.sort_values('Cantidad', ascending=False)
-                    total_cupos = df_cupos_persona['Cantidad'].sum()
-                    if total_cupos > 0:
-                        df_cupos_persona['% Asociación'] = (df_cupos_persona['Cantidad'] / total_cupos * 100).round(2)
-                    else:
-                        df_cupos_persona['% Asociación'] = 0
-                    df_cupos_persona.to_excel(w, index=False, sheet_name='Cupos por Persona')
+            # Verificar si hay datos antes de crear el Excel
+            if df_cupos.empty and df_salas.empty:
+                st.warning("⚠️ No hay reservas registradas para generar el informe.")
+            else:
+                b = BytesIO()
+                sheets_written = False
+                with pd.ExcelWriter(b, engine='openpyxl') as w:
+                    if not df_cupos.empty:
+                        # Por persona - cupos
+                        df_cupos_persona = df_cupos.groupby(['user_name', 'user_email']).agg({
+                            'reservation_date': 'count'
+                        }).reset_index()
+                        df_cupos_persona.columns = ['Nombre', 'Correo', 'Cantidad']
+                        df_cupos_persona = df_cupos_persona.sort_values('Cantidad', ascending=False)
+                        total_cupos = df_cupos_persona['Cantidad'].sum()
+                        if total_cupos > 0:
+                            df_cupos_persona['% Asociación'] = (df_cupos_persona['Cantidad'] / total_cupos * 100).round(2)
+                        else:
+                            df_cupos_persona['% Asociación'] = 0
+                        df_cupos_persona.to_excel(w, index=False, sheet_name='Cupos por Persona')
+                        sheets_written = True
+                    
+                    if not df_salas.empty:
+                        # Por persona - salas
+                        df_salas_persona = df_salas.groupby(['user_name', 'user_email']).agg({
+                            'reservation_date': 'count'
+                        }).reset_index()
+                        df_salas_persona.columns = ['Nombre', 'Correo', 'Cantidad']
+                        df_salas_persona = df_salas_persona.sort_values('Cantidad', ascending=False)
+                        total_salas = df_salas_persona['Cantidad'].sum()
+                        if total_salas > 0:
+                            df_salas_persona['% Asociación'] = (df_salas_persona['Cantidad'] / total_salas * 100).round(2)
+                        else:
+                            df_salas_persona['% Asociación'] = 0
+                        df_salas_persona.to_excel(w, index=False, sheet_name='Salas por Persona')
+                        sheets_written = True
+                    
+                    # Si por alguna razón no se escribió ninguna hoja, crear una vacía
+                    if not sheets_written:
+                        pd.DataFrame({'Mensaje': ['No hay datos disponibles']}).to_excel(w, index=False, sheet_name='Sin Datos')
                 
-                if not df_salas.empty:
-                    # Por persona - salas
-                    df_salas_persona = df_salas.groupby(['user_name', 'user_email']).agg({
-                        'reservation_date': 'count'
-                    }).reset_index()
-                    df_salas_persona.columns = ['Nombre', 'Correo', 'Cantidad']
-                    df_salas_persona = df_salas_persona.sort_values('Cantidad', ascending=False)
-                    total_salas = df_salas_persona['Cantidad'].sum()
-                    if total_salas > 0:
-                        df_salas_persona['% Asociación'] = (df_salas_persona['Cantidad'] / total_salas * 100).round(2)
-                    else:
-                        df_salas_persona['% Asociación'] = 0
-                    df_salas_persona.to_excel(w, index=False, sheet_name='Salas por Persona')
-            
-            st.session_state['toma_report'] = b.getvalue()
-            st.session_state['toma_report_name'] = "toma_salas_cupos.xlsx"
-            st.success("✅ Informe de toma generado")
+                if sheets_written:
+                    st.session_state['toma_report'] = b.getvalue()
+                    st.session_state['toma_report_name'] = "toma_salas_cupos.xlsx"
+                    st.success("✅ Informe de toma generado")
         
         if 'toma_report' in st.session_state:
             st.download_button("📥 Descargar Informe de Toma", st.session_state['toma_report'], 
@@ -2443,6 +2457,11 @@ elif menu == "Administrador":
                     })
             
             df_planos = pd.DataFrame(planos_data)
+            
+            # Asegurar que siempre haya al menos una fila
+            if df_planos.empty:
+                df_planos = pd.DataFrame({'Piso': ['Sin datos'], 'Día': ['-'], 'Zonas Configuradas': [0], 
+                                         'PNG Generado': ['No'], 'PDF Generado': ['No'], 'Estado': ['Sin datos']})
             
             b = BytesIO()
             with pd.ExcelWriter(b, engine='openpyxl') as w:
@@ -2499,7 +2518,223 @@ elif menu == "Administrador":
     with t5: admin_appearance_ui(conn)
     
     with t6:
-        opt = st.radio("Borrar:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"], key="delete_option")
-        if st.button("BORRAR", type="primary", key="delete_button"): 
-            msg = perform_granular_delete(conn, opt)
-            st.success(msg)
+        st.markdown("### 🗑️ Mantenimiento y Limpieza")
+        
+        opt = st.radio("Seleccionar categoría:", ["Reservas", "Distribución", "Planos/Zonas", "TODO"], key="delete_option")
+        
+        if opt == "Reservas":
+            st.markdown("#### 📋 Reservas de Puestos Flex")
+            df_cupos = list_reservations_df(conn)
+            if not df_cupos.empty:
+                # Agregar columna de selección
+                df_cupos_display = df_cupos.copy()
+                df_cupos_display['Seleccionar'] = False
+                
+                # Mostrar tabla con checkboxes
+                st.dataframe(
+                    df_cupos_display[['user_name', 'user_email', 'piso', 'reservation_date', 'team_area']],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Crear checkboxes para cada fila
+                selected_indices_cupos = []
+                for idx in df_cupos.index:
+                    if st.checkbox(
+                        f"Eliminar: {df_cupos.loc[idx, 'user_name']} - {df_cupos.loc[idx, 'reservation_date']} - {df_cupos.loc[idx, 'piso']}",
+                        key=f"del_cupo_{idx}"
+                    ):
+                        selected_indices_cupos.append(idx)
+                
+                if selected_indices_cupos:
+                    if st.button("🗑️ Eliminar Seleccionadas", type="primary", key="delete_selected_cupos"):
+                        deleted = 0
+                        for idx in selected_indices_cupos:
+                            r = df_cupos.loc[idx]
+                            if delete_reservation_from_db(conn, r['user_name'], r['reservation_date'], r['team_area']):
+                                deleted += 1
+                        if deleted > 0:
+                            st.success(f"✅ {deleted} reserva(s) eliminada(s)")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al eliminar reservas")
+                
+                # Opción de borrar todo
+                st.markdown("---")
+                if st.button("🗑️ BORRAR TODAS LAS RESERVAS DE PUESTOS", type="primary", key="delete_all_cupos"):
+                    ws = get_worksheet(conn, "reservations")
+                    if ws:
+                        ws.clear()
+                        ws.append_row(["user_name", "user_email", "piso", "reservation_date", "team_area", "created_at"])
+                        list_reservations_df.clear()
+                        st.success("✅ Todas las reservas de puestos eliminadas")
+                        st.rerun()
+            else:
+                st.info("No hay reservas de puestos registradas")
+            
+            st.markdown("---")
+            st.markdown("#### 🏢 Reservas de Salas")
+            df_salas = get_room_reservations_df(conn)
+            if not df_salas.empty:
+                st.dataframe(
+                    df_salas[['user_name', 'user_email', 'room_name', 'reservation_date', 'start_time', 'end_time']],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                selected_indices_salas = []
+                for idx in df_salas.index:
+                    if st.checkbox(
+                        f"Eliminar: {df_salas.loc[idx, 'user_name']} - {df_salas.loc[idx, 'reservation_date']} - {df_salas.loc[idx, 'room_name']} ({df_salas.loc[idx, 'start_time']})",
+                        key=f"del_sala_{idx}"
+                    ):
+                        selected_indices_salas.append(idx)
+                
+                if selected_indices_salas:
+                    if st.button("🗑️ Eliminar Seleccionadas", type="primary", key="delete_selected_salas"):
+                        deleted = 0
+                        for idx in selected_indices_salas:
+                            r = df_salas.loc[idx]
+                            if delete_room_reservation_from_db(conn, r['user_name'], r['reservation_date'], r['room_name'], r['start_time']):
+                                deleted += 1
+                        if deleted > 0:
+                            st.success(f"✅ {deleted} reserva(s) de sala eliminada(s)")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al eliminar reservas")
+                
+                st.markdown("---")
+                if st.button("🗑️ BORRAR TODAS LAS RESERVAS DE SALAS", type="primary", key="delete_all_salas"):
+                    ws = get_worksheet(conn, "room_reservations")
+                    if ws:
+                        ws.clear()
+                        ws.append_row(["user_name", "user_email", "piso", "room_name", "reservation_date", "start_time", "end_time", "created_at"])
+                        get_room_reservations_df.clear()
+                        st.success("✅ Todas las reservas de salas eliminadas")
+                        st.rerun()
+            else:
+                st.info("No hay reservas de salas registradas")
+        
+        elif opt == "Distribución":
+            st.markdown("#### 📊 Distribuciones Guardadas")
+            df_dist = read_distribution_df(conn)
+            if not df_dist.empty:
+                st.dataframe(df_dist, hide_index=True, use_container_width=True)
+                
+                selected_indices_dist = []
+                for idx in df_dist.index:
+                    r = df_dist.loc[idx]
+                    piso = r.get('piso', r.get('Piso', ''))
+                    equipo = r.get('equipo', r.get('Equipo', ''))
+                    dia = r.get('dia', r.get('Día', ''))
+                    cupos = r.get('cupos', r.get('Cupos', ''))
+                    
+                    if st.checkbox(
+                        f"Eliminar: {piso} - {equipo} - {dia} ({cupos} cupos)",
+                        key=f"del_dist_{idx}"
+                    ):
+                        selected_indices_dist.append(idx)
+                
+                if selected_indices_dist:
+                    if st.button("🗑️ Eliminar Seleccionadas", type="primary", key="delete_selected_dist"):
+                        # Obtener los valores reales de las filas seleccionadas
+                        rows_to_delete = []
+                        for idx in selected_indices_dist:
+                            r = df_dist.loc[idx]
+                            rows_to_delete.append({
+                                'piso': r.get('piso', r.get('Piso', '')),
+                                'equipo': r.get('equipo', r.get('Equipo', '')),
+                                'dia': r.get('dia', r.get('Día', ''))
+                            })
+                        
+                        deleted = 0
+                        for row in rows_to_delete:
+                            if delete_distribution_row(conn, row['piso'], row['equipo'], row['dia']):
+                                deleted += 1
+                        
+                        if deleted > 0:
+                            st.success(f"✅ {deleted} distribución(es) eliminada(s)")
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al eliminar distribuciones")
+                
+                st.markdown("---")
+                if st.button("🗑️ BORRAR TODA LA DISTRIBUCIÓN", type="primary", key="delete_all_dist"):
+                    ws = get_worksheet(conn, "distribution")
+                    if ws:
+                        ws.clear()
+                        ws.append_row(["piso", "equipo", "dia", "cupos", "pct", "created_at"])
+                        read_distribution_df.clear()
+                        st.success("✅ Toda la distribución eliminada")
+                        st.rerun()
+            else:
+                st.info("No hay distribuciones guardadas")
+        
+        elif opt == "Planos/Zonas":
+            st.markdown("#### 🗺️ Zonas Configuradas por Piso y Día")
+            zonas = load_zones()
+            
+            if zonas:
+                for piso in pisos_list:
+                    if piso in zonas and zonas[piso]:
+                        st.markdown(f"**{piso}**")
+                        zonas_piso = zonas[piso]
+                        
+                        # Agrupar por día si es posible
+                        zonas_por_dia = {}
+                        for z in zonas_piso:
+                            dia = z.get('dia', z.get('Día', 'N/A'))
+                            if dia not in zonas_por_dia:
+                                zonas_por_dia[dia] = []
+                            zonas_por_dia[dia].append(z)
+                        
+                        for dia, zonas_dia in zonas_por_dia.items():
+                            with st.expander(f"{dia} ({len(zonas_dia)} zona(s))"):
+                                for i, z in enumerate(zonas_dia):
+                                    equipo = z.get('team', z.get('equipo', 'N/A'))
+                                    color = z.get('color', '#000000')
+                                    c1, c2 = st.columns([4, 1])
+                                    c1.markdown(f"**{equipo}** - Color: {color}")
+                                    if c2.button("🗑️ Eliminar", key=f"del_zone_{piso}_{dia}_{i}"):
+                                        # Encontrar y eliminar la zona
+                                        zonas[piso] = [z2 for z2 in zonas[piso] if not (
+                                            z2.get('team', z2.get('equipo', '')) == equipo and
+                                            z2.get('dia', z2.get('Día', '')) == dia and
+                                            z2.get('color', '') == color
+                                        )]
+                                        if save_zones(zonas):
+                                            st.success("✅ Zona eliminada")
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ Error al eliminar zona")
+                        
+                        # Botón para eliminar todas las zonas del piso
+                        if st.button(f"🗑️ Eliminar Todas las Zonas de {piso}", key=f"delete_all_zones_{piso}"):
+                            zonas[piso] = []
+                            if save_zones(zonas):
+                                st.success(f"✅ Todas las zonas de {piso} eliminadas")
+                                st.rerun()
+                            else:
+                                st.error("❌ Error al eliminar zonas")
+                        st.markdown("---")
+                
+                # Botón para eliminar todas las zonas
+                if st.button("🗑️ BORRAR TODAS LAS ZONAS", type="primary", key="delete_all_zones"):
+                    if save_zones({}):
+                        st.success("✅ Todas las zonas eliminadas")
+                        st.rerun()
+                    else:
+                        st.error("❌ Error al eliminar zonas")
+            else:
+                st.info("No hay zonas configuradas")
+        
+        elif opt == "TODO":
+            st.warning("⚠️ Esta acción eliminará TODAS las reservas, distribuciones y zonas. Esta acción no se puede deshacer.")
+            if st.button("🗑️ BORRAR TODO", type="primary", key="delete_everything"):
+                msg = perform_granular_delete(conn, "TODO")
+                # También eliminar todas las zonas
+                if save_zones({}):
+                    st.success(f"✅ {msg} Todas las zonas eliminadas.")
+                else:
+                    st.success(f"✅ {msg} (Error al eliminar zonas)")
+                st.rerun()
