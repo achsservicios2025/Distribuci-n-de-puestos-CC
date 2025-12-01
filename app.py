@@ -966,6 +966,28 @@ if menu == "Vista pública":
                 """, unsafe_allow_html=True)
             
             lib = df_view[df_view["equipo"]=="Cupos libres"].groupby(["piso","dia"], as_index=True, observed=False).agg({"cupos":"sum"}).reset_index()
+            
+            # CORREGIDO: Asegurar que todos los piso/día tengan al menos 1 cupo libre (máximo 2)
+            # Obtener todos los pisos y días únicos
+            todos_pisos = df_view["piso"].unique()
+            todos_dias = df_view["dia"].unique()
+            
+            # Crear combinaciones completas
+            for piso in todos_pisos:
+                for dia in todos_dias:
+                    if dia != "FinDeSemana":
+                        # Verificar si existe en lib
+                        mask = (lib["piso"] == piso) & (lib["dia"] == dia)
+                        if not mask.any():
+                            # Agregar con 1 cupo mínimo
+                            lib = pd.concat([lib, pd.DataFrame([{"piso": piso, "dia": dia, "cupos": 1}])], ignore_index=True)
+                        else:
+                            # Asegurar mínimo 1, máximo 2
+                            idx = lib[mask].index[0] if mask.any() else None
+                            if idx is not None:
+                                current_val = int(lib.loc[idx, "cupos"]) if pd.notna(lib.loc[idx, "cupos"]) else 1
+                                lib.loc[idx, "cupos"] = max(1, min(2, current_val))
+            
             lib = apply_sorting_to_df(lib)
             
             st.subheader("Distribución completa")
@@ -1073,19 +1095,9 @@ elif menu == "Reservas":
             if dn == "FinDeSemana":
                 st.error("🔒 Es fin de semana. No se pueden realizar reservas.")
             else:
-                rg = df[(df["piso"] == pi) & (df["dia"] == dn) & (df["equipo"] == "Cupos libres")]
-                
-                hay_config = False
-                total_cupos = 0
-                disponibles = 0
-                
-                if not rg.empty:
-                    hay_config = True
-                    total_cupos = int(rg.iloc[0]["cupos"])
-                else:
-                    # CORREGIDO: Si no hay configuración, permitir al menos 1 cupo por piso/día
-                    hay_config = True
-                    total_cupos = 1  # Mínimo 1 cupo disponible por piso/día
+                # CORREGIDO: Siempre hay máximo 2 cupos libres por piso/día (según requerimiento)
+                # Si no hay configuración, se asume 1 cupo disponible mínimo
+                total_cupos = 2  # Máximo 2 cupos libres por día según requerimiento
                 
                 # Calcular ocupados
                 all_res = list_reservations_df(conn)
@@ -1096,11 +1108,19 @@ elif menu == "Reservas":
                            (all_res["team_area"] == "Cupos libres")
                     ocupados = len(all_res[mask])
                 
-                disponibles = max(0, total_cupos - ocupados)
+                # Disponibles = máximo 2, menos los ocupados
+                # Si hay 0 ocupados, hay 1 disponible (mínimo)
+                # Si hay 1 ocupado, hay 1 disponible
+                # Si hay 2 ocupados, hay 0 disponibles (agotado)
+                disponibles = max(0, min(2, total_cupos - ocupados))
                 
-                # Asegurar que siempre haya al menos 1 cupo disponible si no está agotado
-                if disponibles == 0 and ocupados < total_cupos:
+                # Asegurar que siempre haya al menos 1 disponible si no está agotado
+                if ocupados == 0:
                     disponibles = 1
+                elif ocupados == 1:
+                    disponibles = 1
+                elif ocupados >= 2:
+                    disponibles = 0
                 
                 if disponibles > 0:
                     st.success(f"✅ **HAY CUPO: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
@@ -1126,8 +1146,8 @@ elif menu == "Reservas":
                             st.error("Por favor completa el correo electrónico.")
                         elif user_has_reservation(conn, em, str(fe)):
                             st.error("Ya tienes una reserva registrada para esta fecha.")
-                        elif count_monthly_free_spots(conn, em, fe) >= 2:
-                            st.error("Has alcanzado tu límite de 2 reservas mensuales.")
+                        elif count_monthly_free_spots(conn, area_equipo, fe) >= 2:
+                            st.error(f"El equipo/área '{area_equipo}' ha alcanzado el límite de 2 reservas mensuales.")
                         elif disponibles <= 0:
                             st.error("Lo sentimos, el cupo se acaba de agotar.")
                         else:
@@ -1135,7 +1155,11 @@ elif menu == "Reservas":
                             add_reservation(conn, area_equipo, em, pi, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
                             msg = f"✅ Reserva Confirmada:\n\n- Área/Equipo: {area_equipo}\n- Fecha: {fe}\n- Piso: {pi}\n- Tipo: Puesto Flex"
                             st.success(msg)
-                            send_reservation_email(em, "Confirmación Puesto", msg.replace("\n","<br>"))
+                            email_sent = send_reservation_email(em, "Confirmación Puesto", msg.replace("\n","<br>"))
+                            if email_sent:
+                                st.info("📧 Correo de confirmación enviado")
+                            else:
+                                st.warning("⚠️ No se pudo enviar el correo. Verifica la configuración SMTP.")
                             st.rerun()
 
     # ---------------------------------------------------------
@@ -1266,8 +1290,18 @@ elif menu == "Reservas":
                                 add_room_reservation(conn, equipo_seleccionado, e_s, pi_s, sl, str(fe_s), h_inicio, h_fin, datetime.datetime.now(datetime.timezone.utc).isoformat())
                                 msg = f"✅ Sala Confirmada:\n\n- Equipo/Área: {equipo_seleccionado}\n- Sala: {sl}\n- Fecha: {fe_s}\n- Horario: {h_inicio} - {h_fin}"
                                 st.success(msg)
+                                
+                                # Enviar correo de confirmación
                                 if e_s: 
-                                    send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
+                                    try:
+                                        email_sent = send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
+                                        if email_sent:
+                                            st.info("📧 Correo de confirmación enviado")
+                                        else:
+                                            st.warning("⚠️ No se pudo enviar el correo. Verifica la configuración SMTP.")
+                                    except Exception as email_error:
+                                        st.warning(f"⚠️ Error al enviar correo: {email_error}")
+                                
                                 del st.session_state['selected_slot']
                                 st.rerun()
 
