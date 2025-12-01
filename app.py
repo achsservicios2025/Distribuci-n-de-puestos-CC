@@ -1665,48 +1665,36 @@ elif menu == "Administrador":
         if up:
             try:
                 if st.button("📂 Procesar Inicial", type="primary"):
+                st.cache_data.clear()
+                
                 if up: # Verificamos que el archivo existe
                     try:
-                        # 1. Leer Equipos (Siempre)
-                        df_eq = pd.read_excel(up, "Equipos", engine='openpyxl')
-                        
-                        # 2. Leer Parámetros (AHORA SIEMPRE, OBLIGATORIO)
-                        # Antes esto estaba dentro de un 'if', eso causaba el error.
-                        try:
                             df_pa = pd.read_excel(up, "Parámetros", engine='openpyxl')
                         except:
-                            df_pa = pd.DataFrame() # Solo si la hoja realmente no existe en el Excel
+                            df_pa = pd.DataFrame() # Solo si la hoja no existe o falla
+                            st.warning("No se encontró la hoja 'Parámetros'. Se usará la suma de personas como capacidad.")
 
-                        # Guardar en sesión para que no se pierda al recargar
+                        # 4. Guardar en sesión
                         st.session_state['excel_equipos'] = df_eq
                         st.session_state['excel_params'] = df_pa
-                        st.session_state['ignore_params'] = ignore_params
                         
-                        # 3. Calcular Distribución
+                        # 5. Ejecutar lógica
                         if ignore_params:
-                            st.info("🔄 Generando distribución ideal (respetando cupos totales)...")
-                            # Generar opciones ideales
-                            ideal_options = generate_ideal_distributions(df_eq, df_pa, num_options=3)
-                            
-                            st.session_state['ideal_options'] = ideal_options
-                            st.session_state['selected_ideal_option'] = 0
-                            # Usar la opción 1 por defecto
-                            rows, deficit = ideal_options[0]['rows'], ideal_options[0]['deficit']
+                            st.info("Generando distribución ideal (respetando solo capacidad total)...")
+                            # Pasamos df_pa lleno para que seats.py lea el límite físico
+                            dists = generate_ideal_distributions(df_eq, df_pa)
+                            st.session_state['ideal_options'] = dists
+                            st.session_state['proposal_rows'] = dists[0]['rows']
+                            st.session_state['proposal_deficit'] = dists[0]['deficit']
                         else:
-                            # Cálculo normal con la estrategia seleccionada
-                            rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code, ignore_params=False)
+                            # Lógica normal
+                            rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code)
+                            st.session_state['proposal_rows'] = rows
+                            st.session_state['proposal_deficit'] = deficit
                         
-                        # 4. Guardar resultados en sesión
-                        st.session_state['proposal_rows'] = rows
-                        st.session_state['proposal_deficit'] = filter_minimum_deficits(deficit)
-                        st.session_state['last_optimization_stats'] = None
-                        
+                        st.success("Procesado correctamente.")
                         st.rerun()
                         
-                    except Exception as e:
-                        st.error(f"Error al procesar el Excel: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc())
             except Exception as e:
                 st.error(f"Error al leer el Excel: {e}")
 
@@ -2728,6 +2716,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
