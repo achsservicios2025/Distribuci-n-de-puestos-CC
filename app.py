@@ -889,10 +889,12 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             # Calcular % de uso semanal respecto de la dotación total
             team_dots = infer_team_dotacion_map(semanal_df)
             weekly_stats["Dotación"] = weekly_stats["Equipo"].map(team_dots).fillna(0).astype(int)
-            weekly_stats["% Uso Semanal"] = weekly_stats.apply(
-                lambda row: round((row["Total Semanal"] / row["Dotación"]) * 100, 2) if row["Dotación"] > 0 else 0,
-                axis=1
-            )
+            weekly_stats["Total Semanal"] = weekly_stats["Total Semanal"].astype(float)
+            expected_week = (weekly_stats["Dotación"].clip(lower=0) * max(dias_habiles, 1)).astype(float)
+            expected_week = expected_week.mask(expected_week <= 0, 1.0)
+            weekly_stats["% Uso Semanal"] = (
+                (weekly_stats["Total Semanal"] / expected_week).clip(upper=1.0) * 100
+            ).round(2)
             
             # Ordenar por promedio descendente
             weekly_stats = weekly_stats.sort_values("Promedio Cupo Semanal", ascending=False)
@@ -928,7 +930,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     notas = [
         "1. % Distribución Diario: Se calcula dividiendo los cupos asignados en un día específico por la dotación total del equipo.",
         "2. Promedio de Cupo Semanal: Suma de los cupos asignados al equipo durante la semana dividida por los 5 días hábiles (Lunes a Viernes).",
-        "3. % Uso Semanal: Cupos asignados durante la semana divididos por la dotación total del equipo.",
+        "3. % Uso Semanal: Cupos asignados durante la semana divididos por (Dotación total × 5 días hábiles).",
         "4. Cálculo de Déficit: Diferencia entre los cupos mínimos requeridos (según reglas de presencialidad) y los asignados."
     ]
     
