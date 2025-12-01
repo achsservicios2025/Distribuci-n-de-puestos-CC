@@ -918,13 +918,25 @@ settings = st.session_state["app_settings"]
 # Definir variables
 site_title = settings.get("site_title", "Gestor de Puestos y Salas — ACHS Servicios")
 global_logo_path = settings.get("logo_path", "static/logo.png") or "static/logo.png"
+logo_base64 = settings.get("logo_base64")
 if isinstance(global_logo_path, str):
     global_logo_path = global_logo_path.strip()
 
 logo_cargado = False
 
-# Si el logo es una URL remota, intentar mostrarla directamente
-if isinstance(global_logo_path, str) and global_logo_path.lower().startswith(("http://", "https://")):
+# 1) Intentar usar el logo almacenado en base64 (subido via panel)
+if logo_base64:
+    try:
+        logo_bytes = base64.b64decode(logo_base64)
+        c1, c2 = st.columns([1, 5])
+        c1.image(logo_bytes, width=150, use_container_width=False)
+        c2.title(site_title)
+        logo_cargado = True
+    except Exception:
+        logo_cargado = False
+
+# 2) Si no, intentar cargar desde URL
+if not logo_cargado and isinstance(global_logo_path, str) and global_logo_path.lower().startswith(("http://", "https://")):
     try:
         c1, c2 = st.columns([1, 5])
         c1.image(global_logo_path, width=150, use_container_width=False)
@@ -933,12 +945,11 @@ if isinstance(global_logo_path, str) and global_logo_path.lower().startswith(("h
     except Exception:
         logo_cargado = False
 
+# 3) Finalmente, intentar rutas locales
 if not logo_cargado:
-    # Normalizar separadores de ruta para manejar valores guardados en Windows
     if isinstance(global_logo_path, str):
         global_logo_path = global_logo_path.replace("\\", "/")
 
-    # Lista de rutas a intentar (en orden de prioridad)
     logo_paths_to_try = []
     if global_logo_path and global_logo_path != "static/logo.png":
         logo_paths_to_try.append(global_logo_path)
@@ -980,7 +991,7 @@ if not logo_cargado:
     if os.path.exists(default_path):
         st.caption("💡 Logo encontrado pero no se pudo cargar. Verifica que sea una imagen válida.")
     else:
-        st.caption(f"💡 Logo no encontrado en static/logo.png")
+        st.caption("💡 Logo no encontrado en static/logo.png")
 
 # ---------------------------------------------------------
 # MENÚ PRINCIPAL
