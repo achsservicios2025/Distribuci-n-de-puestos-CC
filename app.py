@@ -257,6 +257,7 @@ def get_distribution_proposal(df_equipos, df_parametros, strategy="random", igno
         eq_proc = eq_proc.sort_values(by=col_sort, ascending=True).reset_index(drop=True)
 
     rows, deficit_report = compute_distribution_from_excel(eq_proc, pa_proc, 2, ignore_params=ignore_params)
+    deficit_report = filter_minimum_deficits(deficit_report)
     
     return rows, deficit_report
 
@@ -273,6 +274,19 @@ def generate_ideal_distributions(df_equipos, df_parametros, num_options=3):
             'option_num': i + 1
         })
     return distributions
+
+def filter_minimum_deficits(deficit_list):
+    """Devuelve solo los déficits donde no se cumple el mínimo requerido."""
+    filtered = []
+    for item in deficit_list or []:
+        try:
+            minimo = int(item.get("minimo", 0))
+            asignado = int(item.get("asignado", 0))
+        except (TypeError, ValueError):
+            continue
+        if asignado < minimo:
+            filtered.append(item)
+    return filtered
 
 def clean_reservation_df(df, tipo="puesto"):
     if df.empty: return df
@@ -1591,7 +1605,7 @@ elif menu == "Administrador":
                             rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code, ignore_params=False)
                         
                         st.session_state['proposal_rows'] = rows
-                        st.session_state['proposal_deficit'] = deficit
+                        st.session_state['proposal_deficit'] = filter_minimum_deficits(deficit)
                         st.session_state['last_optimization_stats'] = None
                         st.rerun()
                     except Exception as e:
@@ -1623,7 +1637,7 @@ elif menu == "Administrador":
                     st.session_state['selected_ideal_option'] = selected_idx
                     option_data = st.session_state['ideal_options'][selected_idx]
                     st.session_state['proposal_rows'] = option_data['rows']
-                    st.session_state['proposal_deficit'] = option_data['deficit']
+                    st.session_state['proposal_deficit'] = filter_minimum_deficits(option_data['deficit'])
                     st.rerun()
                 
                 # Mostrar estadísticas de la opción seleccionada
@@ -1657,7 +1671,7 @@ elif menu == "Administrador":
             with t_def:
                 if st.session_state['proposal_deficit']:
                     # Análisis de "Injusticia"
-                    def_df = pd.DataFrame(st.session_state['proposal_deficit'])
+                    def_df = pd.DataFrame(filter_minimum_deficits(st.session_state['proposal_deficit']))
                     
                     # Contamos cuántas veces aparece cada equipo en el reporte de déficit
                     conteo_injusticia = def_df['equipo'].value_counts().reset_index()
@@ -1691,7 +1705,7 @@ elif menu == "Administrador":
                         strategy=sel_strat_code
                     )
                     st.session_state['proposal_rows'] = rows
-                    st.session_state['proposal_deficit'] = deficit
+                    st.session_state['proposal_deficit'] = filter_minimum_deficits(deficit)
                     st.session_state['last_optimization_stats'] = None
                 st.rerun()
 
@@ -1738,7 +1752,7 @@ elif menu == "Administrador":
                     my_bar.progress(int((i + 1) / NUM_INTENTOS * 100), text=f"Simulando escenario {i+1}/{NUM_INTENTOS}...")
                 
                 st.session_state['proposal_rows'] = best_rows
-                st.session_state['proposal_deficit'] = best_deficit
+                st.session_state['proposal_deficit'] = filter_minimum_deficits(best_deficit)
                 st.session_state['last_optimization_stats'] = {'iterations': NUM_INTENTOS, 'score': min_unfairness_score}
                 
                 my_bar.empty()
@@ -1752,7 +1766,7 @@ elif menu == "Administrador":
                     insert_distribution(conn, st.session_state['proposal_rows'])
                     
                     if st.session_state['proposal_deficit']:
-                        st.session_state['deficit_report'] = st.session_state['proposal_deficit']
+                        st.session_state['deficit_report'] = filter_minimum_deficits(st.session_state['proposal_deficit'])
                     elif 'deficit_report' in st.session_state:
                         del st.session_state['deficit_report']
                         
@@ -2104,11 +2118,12 @@ elif menu == "Administrador":
     with t3:
         st.subheader("Generar Reportes de Distribución")
         
-        if 'deficit_report' in st.session_state and st.session_state['deficit_report']:
+        deficits_ui = filter_minimum_deficits(st.session_state.get('deficit_report', []))
+        if deficits_ui:
             st.markdown("---")
             st.error("🚨 INFORME DE DÉFICIT DE CUPOS")
             
-            df_deficit = pd.DataFrame(st.session_state['deficit_report'])
+            df_deficit = pd.DataFrame(deficits_ui)
             df_deficit = df_deficit.rename(columns={
                 'piso': 'Piso', 
                 'dia': 'Día', 
@@ -2117,6 +2132,10 @@ elif menu == "Administrador":
                 'causa': 'Observación'
             })
             st.dataframe(df_deficit, hide_index=True, width=None, use_container_width=True)
+            st.markdown("---")
+        else:
+            st.markdown("---")
+            st.success("✅ Sin déficits detectados: todos los equipos alcanzan su mínimo requerido.")
             st.markdown("---")
 
         # Separar informes de cupos y salas
