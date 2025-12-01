@@ -13,8 +13,7 @@ def normalize_text(text):
 
 def parse_days_from_text(text):
     """
-    Detecta días fijos y días flexibles (opcionales) en el texto.
-    Retorna un diccionario con 'fijos' (set) y 'flexibles' (list of options).
+    Detecta días fijos y días flexibles.
     """
     if pd.isna(text): return {'fijos': set(), 'flexibles': []}
     mapa = {"lunes":"Lunes", "martes":"Martes", "miercoles":"Miércoles", "jueves":"Jueves", "viernes":"Viernes"}
@@ -35,11 +34,11 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
     deficit_report = [] 
 
-    # 1. Normalizar columnas del DataFrame (headers)
+    # 1. Normalizar columnas
     equipos_df.columns = [str(c).strip().lower() for c in equipos_df.columns]
     parametros_df.columns = [str(c).strip().lower() for c in parametros_df.columns]
 
-    # 2. Buscar columnas clave dinámicamente
+    # 2. Buscar columnas clave
     col_piso = next((c for c in equipos_df.columns if 'piso' in normalize_text(c)), None)
     col_equipo = next((c for c in equipos_df.columns if 'equipo' in normalize_text(c)), None)
     col_personas = next((c for c in equipos_df.columns if 'personas' in normalize_text(c) or 'total' in normalize_text(c)), None)
@@ -48,10 +47,12 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     if not (col_piso and col_equipo and col_personas and col_minimos):
         return [], []
 
-    # 3. Procesar Parámetros (o ignorarlos si ignore_params=True)
+    # 3. Procesar Parámetros
     capacidad_pisos = {}
     reglas_full_day = {}
-    cap_reserva_fija = 2  # Por defecto 2 cupos libres por día (máximo según requerimiento)
+    
+    # REGLA DE ORO: La reserva fija es 2 siempre.
+    RESERVA_ESTRICTA_LIBRES = 2
     
     if not ignore_params:
         col_param = next((c for c in parametros_df.columns if 'criterio' in normalize_text(c) or 'parametro' in normalize_text(c)), '')
@@ -64,22 +65,15 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 match_p = re.search(r'piso\s+(\d+)', p)
                 match_c = re.search(r'(\d+)', v)
                 if match_p and match_c: capacidad_pisos[match_p.group(1)] = int(match_c.group(1))
-            if "cupos libres por piso" in p:
-                match_r = re.search(r'(\d+)', v)
-                if match_r: cap_reserva_fija = min(int(match_r.group(1)), 2)  # Máximo 2 cupos libres
             if "dia completo" in p or "día completo" in p:
                 equipo_nombre = re.split(r'd[ií]a completo\s+', p, flags=re.IGNORECASE)[-1].strip()
                 if v: reglas_full_day[normalize_text(equipo_nombre)] = parse_days_from_text(v)
     else:
-        # Modo ideal: calcular capacidad automáticamente basada en equipos
-        # CORREGIDO: La capacidad debe ser igual a la suma de personas (sin margen)
-        # Esto asegura que si hay más trabajadores que puestos, se generen déficits
+        # Modo Ideal: Capacidad = Suma exacta de personas
         for piso_raw in equipos_df[col_piso].dropna().unique():
             piso_str = str(int(piso_raw)) if isinstance(piso_raw, (int, float)) else str(piso_raw)
             df_piso = equipos_df[equipos_df[col_piso] == piso_raw]
             personas_piso = df_piso[col_personas].sum() if col_personas else 0
-            # Capacidad = exactamente la suma de personas (sin margen)
-            # Esto garantiza que si hay más trabajadores que puestos, se generen déficits
             capacidad_pisos[piso_str] = int(personas_piso)
 
     # 4. Algoritmo de Distribución
@@ -88,9 +82,14 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     for piso_raw in pisos_unicos:
         piso_str = str(int(piso_raw)) if isinstance(piso_raw, (int, float)) else str(piso_raw)
         cap_total_piso = capacidad_pisos.get(piso_str, 50) 
+        
+        # --- RESERVA DE ESPACIO ESTRICTA ---
+        # Restamos los 2 cupos libres ANTES de empezar.
+        cap_disponible_equipos = max(0, cap_total_piso - RESERVA_ESTRICTA_LIBRES)
+        
         df_piso = equipos_df[equipos_df[col_piso] == piso_raw].copy()
 
-        # --- Lógica de Flexibles (Pre-asignación de día óptimo) ---
+        # --- Lógica de Flexibles (Pre-asignación) ---
         full_day_asignacion = {} 
         capacidad_fija_por_dia = {d: 0 for d in dias_semana}
         equipos_flexibles = []
@@ -108,12 +107,12 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
             elif is_flexible:
                 equipos_flexibles.append({'eq': nm, 'per': per, 'dias_opt': reglas['fijos']})
             else:
-                # Estimación base para balanceo (usamos la regla de 2 o el mínimo excel)
                 min_req = int(r[col_minimos]) if col_minimos and pd.notna(r[col_minimos]) else 0
                 base_demand = max(2, min_req) if per >= 2 else per
                 for dia in dias_semana: capacidad_fija_por_dia[dia] += base_demand
 
-        capacidad_libre_pre = {d: max(0, cap_total_piso - capacidad_fija_por_dia[d]) for d in dias_semana}
+        capacidad_libre_pre = {d: max(0, cap_disponible_equipos - capacidad_fija_por_dia[d]) for d in dias_semana}
+        
         for item_flex in equipos_flexibles:
             best_day = None; max_libre = -float('inf')
             for dia_opt in item_flex['dias_opt']:
@@ -124,7 +123,7 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 full_day_asignacion[normalize_text(item_flex['eq'])] = best_day
                 capacidad_libre_pre[best_day] -= item_flex['per']
 
-        # --- BUCLE DE ASIGNACIÓN DIARIA (Algoritmo por Rondas) ---
+        # --- BUCLE DIARIO ---
         for dia_idx, dia in enumerate(dias_semana):
             fd_teams = []
             normal_teams = []
@@ -135,10 +134,8 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 per = int(r[col_personas]) if pd.notna(r[col_personas]) else 0
                 min_excel = int(r[col_minimos]) if col_minimos and pd.notna(r[col_minimos]) else 0
                 
-                # Regla de Negocio: Mínimo siempre es al menos 2 (si la dotación lo permite),
-                # o lo que diga el Excel si es mayor a 2.
                 target_min = max(2, min_excel)
-                if target_min > per: target_min = per # No podemos inventar gente
+                if target_min > per: target_min = per
                 
                 reglas = reglas_full_day.get(normalize_text(nm))
                 is_fd_today = False
@@ -147,7 +144,6 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                     if not is_flex and dia in reglas['fijos']: is_fd_today = True
                     elif is_flex and full_day_asignacion.get(normalize_text(nm)) == dia: is_fd_today = True
                 
-                # Estructura de equipo
                 t = {
                     'eq': nm, 
                     'per': per, 
@@ -160,88 +156,69 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 if is_fd_today: fd_teams.append(t)
                 else: normal_teams.append(t)
 
-            # 2. Prioridad 0: Full Day (Entran completos sí o sí)
-            current_cap = cap_total_piso
+            # 2. Asignar Full Day primero (prioridad máxima)
+            current_cap = cap_disponible_equipos
             for t in fd_teams:
                 t['asig'] = t['per']
                 current_cap -= t['asig']
             
-            # Capacidad restante para equipos normales
             remaining_cap = max(0, current_cap)
 
-            # --- CAMBIO 2: ROTACIÓN PARA JUSTICIA ---
-            # Rotamos la lista según el día para que la suerte cambie.
-            # IMPORTANTÍSIMO: No ordenamos por tamaño después de esto, 
-            # para respetar la rotación y la estrategia elegida en app.py.
+            # --- EQUIDAD: ROTACIÓN DIARIA ---
+            # Si hoy es Martes, el orden de reparto cambia respecto al Lunes.
             if len(normal_teams) > 0:
                 shift = dia_idx % len(normal_teams)
                 normal_teams = normal_teams[shift:] + normal_teams[:shift]
 
-            # 3. ALGORITMO DE RONDAS (Equidad Garantizada)
+            # 3. ALGORITMO DE REPARTO (Round Robin Estricto)
             
-            # RONDA 1: Supervivencia (Asegurar 1 cupo a todos)
-            # AQUÍ ESTABA EL BUG: Eliminamos el sort() para respetar el orden de rotación/estrategia
-            for t in normal_teams:
-                if remaining_cap > 0 and t['asig'] < t['per']:
-                    t['asig'] += 1
-                    remaining_cap -= 1
-            
-            # RONDA 2: Regla del Mínimo 2 (Asegurar 2 cupos a todos)
-            for t in normal_teams:
-                if remaining_cap > 0 and t['asig'] < 2 and t['asig'] < t['per']:
-                    t['asig'] += 1
-                    remaining_cap -= 1
-            
-            # RONDA 3: Mínimo del Excel (Si el Excel pedía > 2)
-            # Aquí priorizamos cumplir el requerimiento formal del Excel
-            for t in normal_teams:
-                if remaining_cap > 0 and t['asig'] < t['min_excel'] and t['asig'] < t['per']:
-                    needed = t['min_excel'] - t['asig']
-                    give = min(needed, remaining_cap)
-                    t['asig'] += give
-                    remaining_cap -= give
-
-            # RONDA 4: Crecimiento Proporcional (Llenar con lo que sobra)
-            # Ahora priorizamos a los equipos grandes que tienen mayor brecha
+            # FASE 1: Asegurar el mínimo vital (1 cupo) a todos, en orden rotativo
             if remaining_cap > 0:
-                pool = [t for t in normal_teams if t['asig'] < t['per']]
-                if pool:
-                    # Calcular cuántos faltan en total
-                    total_gap = sum(t['per'] - t['asig'] for t in pool)
-                    factor = remaining_cap / total_gap if total_gap > 0 else 0
-                    
-                    dist_round = 0
-                    for t in pool:
-                        gap = t['per'] - t['asig']
-                        extra = math.floor(gap * factor)
-                        t['asig'] += extra
-                        dist_round += extra
-                    
-                    remaining_cap -= dist_round
-                    
-                    # Saldo final (repartir cupos sueltos por redondeo)
-                    # Aquí sí ordenamos por necesidad (quien tiene mayor brecha), pero respetamos rotación para empates
-                    pool.sort(key=lambda x: (x['per'] - x['asig']), reverse=True)
-                    
-                    # --- CAMBIO 3: ROTACIÓN EN EL POOL ---
-                    # También rotamos aquí para que el "cupo extra de la suerte" no se lo lleve siempre el mismo
-                    if len(pool) > 0:
-                         shift_pool = dia_idx % len(pool)
-                         pool = pool[shift_pool:] + pool[:shift_pool]
+                keep_going = True
+                while keep_going and remaining_cap > 0:
+                    keep_going = False
+                    for t in normal_teams:
+                        # Si tiene menos de 1 cupo, se lo damos
+                        if remaining_cap > 0 and t['asig'] < 1 and t['asig'] < t['per']:
+                            t['asig'] += 1
+                            remaining_cap -= 1
+                            keep_going = True
 
-                    for t in pool:
+            # FASE 2: Asegurar el mínimo deseado (generalmente 2 o Excel), en orden rotativo
+            if remaining_cap > 0:
+                keep_going = True
+                while keep_going and remaining_cap > 0:
+                    keep_going = False
+                    for t in normal_teams:
+                        goal = t['target_min']
+                        if remaining_cap > 0 and t['asig'] < goal and t['asig'] < t['per']:
+                            t['asig'] += 1
+                            remaining_cap -= 1
+                            keep_going = True # Seguimos iterando para ser equitativos
+
+            # FASE 3: Llenado equitativo hasta agotar capacidad (Sin favorecer grandes)
+            # Damos 1 cupo extra a cada uno por turno, hasta que se acabe el espacio.
+            if remaining_cap > 0:
+                keep_going = True
+                while keep_going and remaining_cap > 0:
+                    keep_going = False
+                    for t in normal_teams:
                         if remaining_cap > 0 and t['asig'] < t['per']:
                             t['asig'] += 1
                             remaining_cap -= 1
+                            keep_going = True
 
-            # 4. Cálculo de Déficit y Reporte
-            # CORREGIDO: Se considera déficit si no se cumplió la dotación completa (per) o el mínimo (target_min)
+            # 4. Cálculo de Déficit
             for t in normal_teams:
-                # El objetivo real es el mayor entre 2 y el excel, pero también verificar si no alcanzó su dotación completa
                 goal = t['target_min']
-                # Si no alcanzó su dotación completa, hay déficit
+                # Si no llegó a su totalidad
                 if t['asig'] < t['per']:
                     t['deficit'] = t['per'] - t['asig']
+                    
+                    reason = "Falta espacio para dotación completa"
+                    if t['asig'] < goal:
+                        reason = "No alcanzó el mínimo requerido"
+                    
                     deficit_report.append({
                         "piso": f"Piso {piso_str}", 
                         "equipo": t['eq'], 
@@ -250,31 +227,11 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                         "minimo": goal,
                         "asignado": t['asig'],
                         "deficit": t['deficit'],
-                        "causa": f"Faltan {t['deficit']} puestos (capacidad insuficiente)"
-                    })
-                # También verificar si no alcanzó el mínimo requerido
-                elif t['asig'] < goal:
-                    t['deficit'] = goal - t['asig']
-                    deficit_report.append({
-                        "piso": f"Piso {piso_str}", 
-                        "equipo": t['eq'], 
-                        "dia": dia, 
-                        "dotacion": t['per'],
-                        "minimo": goal,
-                        "asignado": t['asig'],
-                        "deficit": t['deficit'],
-                        "causa": "No alcanzó el mínimo requerido"
+                        "causa": reason
                     })
 
-            # 5. Cupos Libres (Solo si sobró después de satisfacer a TODOS al 100%)
-            # O si sobró capacidad y ya nadie necesita más puestos
-            final_libres = 0
-            # Verificamos si alguien quedó con déficit (incluso de crecimiento)
-            alguien_falta = any(t['asig'] < t['per'] for t in normal_teams)
-            
-            if not alguien_falta and remaining_cap > 0:
-                 # Máximo 2 cupos libres por día (según requerimiento)
-                 final_libres = min(remaining_cap, min(cap_reserva_fija, 2)) if cap_reserva_fija > 0 else min(remaining_cap, 2)
+            # 5. Cupos Libres - ASIGNACIÓN OBLIGATORIA
+            final_libres = RESERVA_ESTRICTA_LIBRES + remaining_cap
 
             # Guardar resultados
             all_teams = fd_teams + normal_teams
