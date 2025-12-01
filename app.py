@@ -1038,54 +1038,76 @@ if menu == "Vista pública":
                         except:
                             pass
                 
-                # Crear calendario HTML
+                # Crear calendario HTML con dimensiones ajustadas para más información
                 import calendar
                 cal = calendar.monthcalendar(mes_sel.year, mes_sel.month)
                 
-                # Crear HTML para el calendario
+                # Crear HTML para el calendario con mejor diseño
                 html_cal = f"""
-                <div style="margin: 20px 0;">
-                    <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
+                <div style="margin: 20px 0; overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; table-layout: fixed;">
                         <thead>
                             <tr style="background-color: #00A04A; color: white;">
-                                <th style="padding: 10px; border: 1px solid #ddd;">Lun</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Mar</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Mié</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Jue</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Vie</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Sáb</th>
-                                <th style="padding: 10px; border: 1px solid #ddd;">Dom</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Lun</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mar</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mié</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Jue</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Vie</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Sáb</th>
+                                <th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Dom</th>
                             </tr>
                         </thead>
                         <tbody>
                 """
                 
                 for week in cal:
-                    html_cal += "<tr>"
+                    html_cal += "<tr style='height: 120px;'>"
                     for day in week:
                         if day == 0:
-                            html_cal += '<td style="padding: 10px; border: 1px solid #ddd; background-color: #f5f5f5;"></td>'
+                            html_cal += '<td style="padding: 0; border: 1px solid #ddd; background-color: #f5f5f5; vertical-align: top;"></td>'
                         else:
                             fecha_dia = datetime.date(mes_sel.year, mes_sel.month, day)
                             # Buscar reservas para este día
                             reservas_dia = [r for r in reservas_piso if r["fecha"].date() == fecha_dia]
                             
                             if reservas_dia:
-                                equipos_str = ", ".join([r["equipo"] for r in reservas_dia])
+                                # Limitar a 3 equipos visibles, mostrar "+X más" si hay más
+                                equipos_lista = [r["equipo"] for r in reservas_dia]
+                                if len(equipos_lista) > 3:
+                                    equipos_mostrar = equipos_lista[:3]
+                                    equipos_restantes = len(equipos_lista) - 3
+                                    equipos_str = "<br>".join([f"• {eq}" for eq in equipos_mostrar])
+                                    equipos_str += f'<br><span style="color: #006B32; font-weight: bold;">+{equipos_restantes} más</span>'
+                                else:
+                                    equipos_str = "<br>".join([f"• {eq}" for eq in equipos_lista])
+                                
                                 html_cal += f'''
-                                <td style="padding: 10px; border: 1px solid #ddd; background-color: #e8f5e9; font-size: 11px;">
-                                    <strong>{day}</strong><br>
-                                    <span style="color: #006B32;">{equipos_str}</span>
+                                <td style="padding: 8px 6px; border: 1px solid #ddd; background-color: #e8f5e9; vertical-align: top; min-height: 120px;">
+                                    <div style="font-size: 14px; font-weight: bold; color: #006B32; margin-bottom: 4px; border-bottom: 1px solid #c8e6c9; padding-bottom: 2px;">{day}</div>
+                                    <div style="font-size: 10px; color: #2e7d32; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">
+                                        {equipos_str}
+                                    </div>
                                 </td>
                                 '''
                             else:
-                                html_cal += f'<td style="padding: 10px; border: 1px solid #ddd;">{day}</td>'
+                                html_cal += f'''
+                                <td style="padding: 8px 6px; border: 1px solid #ddd; vertical-align: top; min-height: 120px;">
+                                    <div style="font-size: 14px; font-weight: bold; color: #666; margin-bottom: 4px;">{day}</div>
+                                    <div style="font-size: 9px; color: #999; font-style: italic;">Disponible</div>
+                                </td>
+                                '''
                     html_cal += "</tr>"
                 
                 html_cal += """
                         </tbody>
                     </table>
                 </div>
+                <style>
+                    @media (max-width: 768px) {
+                        table { font-size: 10px; }
+                        td { padding: 4px 2px !important; min-height: 80px !important; }
+                    }
+                </style>
                 """
                 
                 st.markdown(html_cal, unsafe_allow_html=True)
@@ -1649,6 +1671,7 @@ elif menu == "Administrador":
 
             st.markdown("---")
             st.markdown("### 🔧 Herramientas de Justicia")
+            st.caption("💡 **Probar otra suerte:** Genera una nueva variación aleatoria | **Auto-Optimizar:** Prueba 20 variaciones y elige la más equitativa | **Guardar Definitivo:** Guarda la distribución actual en la base de datos")
             
             c_actions = st.columns([1, 1, 1])
             
@@ -1917,12 +1940,23 @@ elif menu == "Administrador":
                     if st.button("💾 Guardar Zonas Manualmente", key=f"manual_save_{p_sel}"):
                         try:
                             zones_data = json.loads(zones_json_hidden)
-                            zonas[p_sel] = zones_data
-                            save_zones(zonas)
-                            st.success(f"✅ {len(zones_data)} zonas guardadas manualmente!")
-                            st.rerun()
+                            if isinstance(zones_data, list):
+                                zonas[p_sel] = zones_data
+                                save_zones(zonas)
+                                # Actualizar session_state
+                                st.session_state[last_zones_key] = json.dumps(zones_data, sort_keys=True)
+                                st.success(f"✅ {len(zones_data)} zonas guardadas manualmente!")
+                                # Recargar zonas
+                                zonas = load_zones()
+                                st.rerun()
+                            else:
+                                st.error("Formato de datos inválido")
+                        except json.JSONDecodeError as e:
+                            st.error(f"Error al parsear JSON: {e}")
                         except Exception as e:
                             st.error(f"Error al guardar: {e}")
+                            import traceback
+                            st.code(traceback.format_exc())
                     
                     st.info("💡 **Guardado Automático:** Dibuja zonas y haz clic en '💾 Guardar Zonas' en el editor. Las zonas se guardarán automáticamente.")
                             
