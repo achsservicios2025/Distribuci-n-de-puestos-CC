@@ -69,7 +69,7 @@ from modules.database import (
     count_monthly_free_spots, delete_reservation_from_db, 
     delete_room_reservation_from_db, perform_granular_delete,
     ensure_reset_table, save_reset_token, validate_and_consume_token,
-    delete_distribution_row, delete_distribution_rows_by_indices, read_distribution_df,
+    delete_distribution_row, delete_distribution_rows_by_indices,
     get_worksheet
 )
 from modules.auth import get_admin_credentials
