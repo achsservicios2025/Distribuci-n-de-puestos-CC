@@ -9,19 +9,37 @@ def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.
     Envía un correo HTML con el logo incrustado (si es posible mediante URL pública o CID).
     Para simplificar en local, usaremos un diseño HTML limpio.
     """
+    # Validar email
+    if not to_email or '@' not in to_email:
+        print(f"❌ Email inválido: {to_email}")
+        return False
+    
     # Intentar obtener credenciales de secrets
     try:
         smtp_server = st.secrets["smtp"]["server"]
-        smtp_port = st.secrets["smtp"]["port"]
+        smtp_port = int(st.secrets["smtp"]["port"])
         smtp_user = st.secrets["smtp"]["user"]
         smtp_password = st.secrets["smtp"]["password"]
-    except:
-        print("No se encontraron credenciales SMTP en .streamlit/secrets.toml")
+        # Usar 'sender' si está disponible (para Brevo), sino usar smtp_user
+        sender_email = st.secrets["smtp"].get("sender", smtp_user)
+        print(f"✅ Credenciales SMTP encontradas: servidor={smtp_server}, puerto={smtp_port}, usuario={smtp_user}, remitente={sender_email}")
+    except KeyError as e:
+        print(f"❌ No se encontró la clave SMTP en secrets: {e}")
+        print("💡 Asegúrate de tener configurado en .streamlit/secrets.toml:")
+        print("   [smtp]")
+        print("   server = 'smtp-relay.brevo.com'  # o tu servidor SMTP")
+        print("   port = 587")
+        print("   user = 'tu_usuario_smtp'")
+        print("   password = 'tu_contraseña_o_api_key'")
+        print("   sender = 'tu_email@ejemplo.com'  # Email del remitente (opcional)")
+        return False
+    except Exception as e:
+        print(f"❌ Error al leer credenciales SMTP: {e}")
         return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = smtp_user
+    msg["From"] = sender_email  # Usar el email del remitente, no el usuario SMTP
     msg["To"] = to_email
 
     # Diseño HTML Profesional
@@ -64,11 +82,36 @@ def send_reservation_email(to_email, subject, body_html, logo_path="static/logo.
     msg.attach(part)
 
     try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, to_email, msg.as_string())
+        print(f"📧 Intentando enviar correo a {to_email}...")
+        print(f"   Servidor: {smtp_server}:{smtp_port}")
+        
+        # Crear conexión SMTP
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.set_debuglevel(1)  # Activar debug para ver qué pasa
+        server.starttls()
+        
+        print(f"   Iniciando sesión como {smtp_user}...")
+        server.login(smtp_user, smtp_password)
+        
+        print(f"   Enviando mensaje desde {sender_email} a {to_email}...")
+        # Usar sender_email como remitente en sendmail
+        server.sendmail(sender_email, to_email, msg.as_string())
+        server.quit()
+        
+        print(f"✅ Correo enviado exitosamente a {to_email}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"❌ Error de autenticación SMTP: {e}")
+        print("💡 Verifica que:")
+        print("   1. El usuario y contraseña sean correctos")
+        print("   2. Si usas Gmail, habilites 'Contraseñas de aplicaciones'")
+        print("   3. Si usas Gmail, desactives 'Verificación en 2 pasos' o uses una contraseña de app")
+        return False
+    except smtplib.SMTPException as e:
+        print(f"❌ Error SMTP: {e}")
+        return False
     except Exception as e:
-        print(f"Error enviando email: {e}")
+        print(f"❌ Error enviando email a {to_email}: {e}")
+        import traceback
+        print(traceback.format_exc())
         return False
