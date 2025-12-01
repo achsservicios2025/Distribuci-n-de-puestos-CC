@@ -1665,43 +1665,46 @@ elif menu == "Administrador":
         if up:
             try:
                 if st.button("📂 Procesar Inicial", type="primary"):
+                if up: # Verificamos que el archivo existe
                     try:
-                        # 1. Leer Equipos
+                        # 1. Leer Equipos (Siempre)
                         df_eq = pd.read_excel(up, "Equipos", engine='openpyxl')
                         
-                        # 2. CORRECCIÓN: Leer Parámetros SIEMPRE
-                        # (Para saber los cupos totales del piso, aunque ignoremos las reglas de días)
+                        # 2. Leer Parámetros (AHORA SIEMPRE, OBLIGATORIO)
+                        # Antes esto estaba dentro de un 'if', eso causaba el error.
                         try:
                             df_pa = pd.read_excel(up, "Parámetros", engine='openpyxl')
                         except:
-                            df_pa = pd.DataFrame() # Solo si la hoja no existe
+                            df_pa = pd.DataFrame() # Solo si la hoja realmente no existe en el Excel
 
-                        # Guardar en sesión
+                        # Guardar en sesión para que no se pierda al recargar
                         st.session_state['excel_equipos'] = df_eq
                         st.session_state['excel_params'] = df_pa
                         st.session_state['ignore_params'] = ignore_params
                         
-                        # 3. Lógica de cálculo
+                        # 3. Calcular Distribución
                         if ignore_params:
                             st.info("🔄 Generando distribución ideal (respetando cupos totales)...")
+                            # Generar opciones ideales
                             ideal_options = generate_ideal_distributions(df_eq, df_pa, num_options=3)
                             
                             st.session_state['ideal_options'] = ideal_options
                             st.session_state['selected_ideal_option'] = 0
-                            # Tomar la primera opción por defecto
+                            # Usar la opción 1 por defecto
                             rows, deficit = ideal_options[0]['rows'], ideal_options[0]['deficit']
                         else:
-                            # Lógica normal con la estrategia seleccionada (Tetris/Random/etc)
+                            # Cálculo normal con la estrategia seleccionada
                             rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code, ignore_params=False)
                         
-                        # 4. Actualizar sesión con resultados
+                        # 4. Guardar resultados en sesión
                         st.session_state['proposal_rows'] = rows
                         st.session_state['proposal_deficit'] = filter_minimum_deficits(deficit)
                         st.session_state['last_optimization_stats'] = None
+                        
                         st.rerun()
                         
                     except Exception as e:
-                        st.error(f"Error al leer el Excel: {e}")
+                        st.error(f"Error al procesar el Excel: {str(e)}")
                         import traceback
                         st.code(traceback.format_exc())
             except Exception as e:
@@ -2725,5 +2728,6 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
