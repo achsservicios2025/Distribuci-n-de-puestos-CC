@@ -94,7 +94,6 @@ from modules.rooms import generate_time_slots, check_room_conflict
 from modules.zones import generate_colored_plan, load_zones, save_zones
 from streamlit_drawable_canvas import st_canvas
 import streamlit.components.v1 as components
-from streamlit_zone_editor import zone_editor
 
 # ---------------------------------------------------------
 # 3. CONFIGURACIÓN GENERAL
@@ -613,46 +612,42 @@ def create_enhanced_drawing_component(img_path, existing_zones, selected_team=""
                     }});
                 }}
                 
-                function saveZones() {{
-                    // Guardar automáticamente - enviar directamente a Streamlit
-                    const zonesData = rectangles;
-                    const zonesJson = JSON.stringify(zonesData);
+                function notifyStreamlit(actionType) {{
+                    const payload = {{
+                        action: actionType,
+                        zones: rectangles
+                    }};
                     
-                    // Enviar a Streamlit usando postMessage
+                    // API oficial de componentes
+                    if (window.Streamlit && typeof window.Streamlit.setComponentValue === 'function') {{
+                        window.Streamlit.setComponentValue(payload);
+                        return true;
+                    }}
+                    
+                    // Fallback via postMessage
                     if (window.parent) {{
-                        // Enviar mensaje al padre
                         window.parent.postMessage({{
-                            type: 'zones_saved',
-                            piso: '{p_sel}',
-                            zones: zonesData,
-                            zones_json: zonesJson
+                            type: 'streamlit:setComponentValue',
+                            value: payload
                         }}, '*');
-                        
-                        // También guardar en localStorage como respaldo
-                        localStorage.setItem('zones_save_{p_sel}', zonesJson);
-                        
-                        alert('✅ Zonas guardadas automáticamente! (' + rectangles.length + ' zonas)\\n\\nLa página se actualizará en un momento.');
+                        return true;
+                    }}
+                    
+                    return false;
+                }}
+                
+                function saveZones() {{
+                    if (notifyStreamlit('manual')) {{
+                        alert('✅ Zonas guardadas automáticamente! (' + rectangles.length + ' zonas)');
                     }} else {{
-                        // Fallback: guardar en localStorage
-                        localStorage.setItem('zones_save_{p_sel}', zonesJson);
-                        alert('✅ Zonas guardadas! (' + rectangles.length + ' zonas)');
+                        alert('⚠️ No se pudo comunicar con Streamlit. Intenta recargar la página.');
                     }}
                 }}
                 
-                // Auto-guardar cuando se dibuja un rectángulo
+                // Auto-guardar silencioso al terminar de dibujar
                 canvas.addEventListener('mouseup', function(e) {{
-                    // Después de dibujar, auto-guardar después de un breve delay
                     if (isDrawing && currentRect && Math.abs(currentRect.w) > 10 && Math.abs(currentRect.h) > 10) {{
-                        setTimeout(() => {{
-                            // Auto-guardar silenciosamente
-                            if (window.parent && rectangles.length > 0) {{
-                                window.parent.postMessage({{
-                                    type: 'zones_saved',
-                                    piso: '{p_sel}',
-                                    zones: rectangles
-                                }}, '*');
-                            }}
-                        }}, 500);
+                        setTimeout(() => notifyStreamlit('auto'), 300);
                     }}
                 }});
                 
@@ -1838,14 +1833,19 @@ elif menu == "Administrador":
                     else:
                         st.warning("⚠️ Selecciona un equipo y color en el panel derecho antes de dibujar")
                     
-                    # Renderizar componente personalizado (con comunicación nativa)
-                    editor_result = zone_editor(
-                        img_path=str(pim),
-                        existing_zones=existing_zones,
+                    # Renderizar componente HTML con comunicación via Streamlit.setComponentValue
+                    editor_html = create_enhanced_drawing_component(
+                        str(pim),
+                        existing_zones,
                         selected_team=selected_team,
                         selected_color=selected_color or "#00A04A",
-                        width=650,
-                        key=f"zone_editor_{p_sel}"
+                        width=640
+                    )
+                    
+                    editor_result = components.html(
+                        editor_html,
+                        height=720,
+                        scrolling=False
                     )
                     
                     # Botones de acción
@@ -1872,17 +1872,25 @@ elif menu == "Administrador":
                             st.warning("⚠️ Haz clic de nuevo para confirmar la eliminación de TODAS las zonas")
                     
                     # Procesar respuesta del componente
-                    if editor_result and isinstance(editor_result, dict):
-                        action = editor_result.get("action")
-                        zonas_component = editor_result.get("zones", [])
-                        if action == "save" and isinstance(zonas_component, list):
-                            zonas[p_sel] = zonas_component
-                            if save_zones(zonas):
-                                st.success(f"✅ {len(zonas_component)} zonas guardadas correctamente.")
-                                st.session_state[f"last_zones_{p_sel}"] = json.dumps(zonas_component, sort_keys=True)
-                                st.rerun()
-                            else:
-                                st.error("❌ Error al guardar las zonas. Intenta nuevamente.")
+                    if editor_result:
+                        try:
+                            payload = editor_result
+                            if isinstance(payload, str):
+                                payload = json.loads(payload)
+                            if isinstance(payload, dict):
+                                action = payload.get("action")
+                                zonas_component = payload.get("zones", [])
+                                if action in ("save", "auto") and isinstance(zonas_component, list):
+                                    zonas[p_sel] = zonas_component
+                                    if save_zones(zonas):
+                                        st.success(f"✅ {len(zonas_component)} zonas guardadas correctamente.")
+                                        st.session_state[f"last_zones_{p_sel}"] = json.dumps(zonas_component, sort_keys=True)
+                                        if action == "save":
+                                            st.rerun()
+                                    else:
+                                        st.error("❌ Error al guardar las zonas. Intenta nuevamente.")
+                        except Exception:
+                            pass
                     
                     st.info("💡 **Instrucciones:** 1) Selecciona equipo y color a la derecha. 2) Dibuja zonas en el editor. 3) Haz clic en '💾 Guardar Zonas' dentro del editor para guardar automáticamente.")
                             
