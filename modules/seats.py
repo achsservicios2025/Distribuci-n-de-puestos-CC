@@ -41,27 +41,34 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     if not (col_piso and col_equipo and col_personas and col_minimos):
         return [], []
 
-    # 3. Procesar Parámetros (LECTURA INTELIGENTE)
+    # 3. Procesar Parámetros (LECTURA OBLIGATORIA DE CAPACIDAD)
     capacidad_pisos = {}
     reglas_full_day = {}
+    
+    # REGLA DE ORO: 2 Cupos Libres SIEMPRE (Ignoramos lo que diga el Excel sobre cupos libres)
     RESERVA_OBLIGATORIA = 2 
 
+    # Detectar columnas de parámetros
     col_param = next((c for c in parametros_df.columns if 'criterio' in normalize_text(c) or 'parametro' in normalize_text(c)), '')
     col_valor = next((c for c in parametros_df.columns if 'valor' in normalize_text(c)), '')
 
-    # PASO A: Leer SIEMPRE la capacidad física (Cupos Totales), sin importar ignore_params
     if col_param and col_valor:
         for _, row in parametros_df.iterrows():
             p = str(row.get(col_param, '')).strip().lower()
             v = str(row.get(col_valor, '')).strip()
-            # Esto se lee SIEMPRE
-            if "cupos totales piso" in p:
+            
+            # --- ESTO SE LEE SIEMPRE (Incluso si ignore_params=True) ---
+            # Leemos la capacidad física real del edificio (Líneas 2, 3, 4 de tu imagen)
+            if "cupos totales" in p or "capacidad" in p:
                 match_p = re.search(r'piso\s+(\d+)', p)
                 match_c = re.search(r'(\d+)', v)
+                
+                # Si encontramos un número de piso y un valor numérico
                 if match_p and match_c: 
                     capacidad_pisos[match_p.group(1)] = int(match_c.group(1))
-
-            # PASO B: Leer reglas específicas SOLO SI NO ignoramos parámetros
+            
+            # --- ESTO SOLO SE LEE SI NO IGNORAMOS PARAMETROS ---
+            # Reglas de negocio (Días completos, mínimos, etc.)
             if not ignore_params:
                 if "dia completo" in p or "día completo" in p:
                     equipo_nombre = re.split(r'd[ií]a completo\s+', p, flags=re.IGNORECASE)[-1].strip()
@@ -74,18 +81,18 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
         piso_str = str(int(piso_raw)) if isinstance(piso_raw, (int, float)) else str(piso_raw)
         
         # --- DEFINICIÓN DE CAPACIDAD REAL ---
-        # Si existe en el Excel (parametros), usamos eso.
-        # Si NO existe en el Excel (porque el usuario no lo puso), usamos la suma de personas como fallback.
+        # 1. Buscamos en lo que leímos del Excel (prioridad absoluta)
         if piso_str in capacidad_pisos:
             cap_total_real = capacidad_pisos[piso_str]
         else:
-            # Fallback: Solo si no está definido en parametros, sumamos la gente del piso
+            # 2. Si NO estaba en el Excel, sumamos las personas (Fallback)
             df_temp = equipos_df[equipos_df[col_piso] == piso_raw]
             cap_total_real = int(df_temp[col_personas].sum()) if col_personas else 50
 
         # --- TECHO DURO PARA EQUIPOS ---
-        # Si Total Real es 38, el Techo es 36.
-        # Los equipos JAMÁS recibirán más de 36.
+        # Ejemplo: Excel dice 38. Reserva es 2.
+        # hard_cap_equipos = 38 - 2 = 36.
+        # Los equipos nunca podrán pasar de 36.
         hard_cap_equipos = max(0, cap_total_real - RESERVA_OBLIGATORIA)
         
         df_piso = equipos_df[equipos_df[col_piso] == piso_raw].copy()
@@ -161,12 +168,12 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 t['asig'] = to_assign
                 used_cap += to_assign
 
-            # 2. Rotación Equitativa
+            # 2. Rotación Equitativa (Para no castigar siempre a los mismos)
             if len(normal_teams) > 0:
                 shift = dia_idx % len(normal_teams)
                 normal_teams = normal_teams[shift:] + normal_teams[:shift]
 
-            # 3. Reparto Round Robin
+            # 3. Reparto Round Robin (Equitativo)
             keep_going = True
             while keep_going and used_cap < hard_cap_equipos:
                 keep_going = False
@@ -191,9 +198,9 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                     })
 
             # 5. INSERCIÓN DE CUPOS LIBRES
-            # Aquí está la magia: Usamos el Total Real - Lo que gastaron los equipos
-            # Si Total=38, Equipos gastaron max 36. Remanente = 38 - 36 = 2.
-            # Si Total=38, Equipos gastaron 30 (porque son pocos). Remanente = 38 - 30 = 8.
+            # Calculamos lo que sobró respecto al TOTAL REAL (ej. 38)
+            # Como los equipos toparon en 36, el remanente mínimo será 2.
+            # Si los equipos eran pequeños y solo usaron 20, el remanente será 18.
             remanente_real = cap_total_real - used_cap
             
             # Guardar filas de equipos
@@ -203,7 +210,7 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                     pct = round((t['asig'] / t['per']) * 100, 1) if t['per'] > 0 else 0.0
                     rows.append({"piso": f"Piso {piso_str}", "equipo": t['eq'], "dia": dia, "cupos": int(t['asig']), "pct": pct})
             
-            # Guardar fila de Cupos Libres
+            # Guardar fila de Cupos Libres (Siempre será >= 2)
             if remanente_real > 0:
                 pct_libres = round((remanente_real / cap_total_real) * 100, 1)
                 rows.append({"piso": f"Piso {piso_str}", "equipo": "Cupos libres", "dia": dia, "cupos": int(remanente_real), "pct": pct_libres})
