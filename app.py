@@ -1225,69 +1225,64 @@ elif menu == "Reservas":
                 total_cupos = 2  # Máximo 2 cupos libres por día según requerimiento
                 
                 # Calcular ocupados
-                    all_res = list_reservations_df(conn)
-                    ocupados = 0
-                    if not all_res.empty:
-                        mask = (all_res["reservation_date"].astype(str) == str(fe)) & \
-                               (all_res["piso"] == pi) & \
-                               (all_res["team_area"] == "Cupos libres")
-                        ocupados = len(all_res[mask])
-                    
+                all_res = list_reservations_df(conn)
+                ocupados = 0
+                if not all_res.empty:
+                    mask = (all_res["reservation_date"].astype(str) == str(fe)) & \
+                           (all_res["piso"] == pi) & \
+                           (all_res["team_area"] == "Cupos libres")
+                    ocupados = len(all_res[mask])
+                
                 # Disponibles = máximo 2, menos los ocupados
-                # Si hay 0 ocupados, hay 1 disponible (mínimo)
-                # Si hay 1 ocupado, hay 1 disponible
-                # Si hay 2 ocupados, hay 0 disponibles (agotado)
                 disponibles = max(0, min(2, total_cupos - ocupados))
                 
                 # Asegurar que siempre haya al menos 1 disponible si no está agotado
-                if ocupados == 0:
+                if ocupados <= 1:
                     disponibles = 1
-                elif ocupados == 1:
-                    disponibles = 1
-                elif ocupados >= 2:
+                else:
                     disponibles = 0
                 
-                    if disponibles > 0:
-                        st.success(f"✅ **HAY CUPO: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
-                    else:
-                        st.error(f"🔴 **AGOTADO: Se ocuparon los {total_cupos} puestos del día.**")
-                    
-                    st.markdown("### Datos del Solicitante")
+                if disponibles > 0:
+                    st.success(f"✅ **HAY CUPO: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
+                else:
+                    st.error(f"🔴 **AGOTADO: Se ocuparon los {total_cupos} puestos del día.**")
+                
+                st.markdown("### Datos del Solicitante")
                 
                 # Obtener lista de equipos para seleccionar área
                 equipos_disponibles = sorted(df[df["piso"] == pi]["equipo"].unique().tolist())
                 equipos_disponibles = [e for e in equipos_disponibles if e != "Cupos libres"]
-                    
-                    with st.form("form_puesto"):
-                        cf1, cf2 = st.columns(2)
-                    # CAMBIO: Área/Equipo en lugar de nombre
+                
+                with st.form("form_puesto"):
+                    cf1, cf2 = st.columns(2)
                     area_equipo = cf1.selectbox("Área / Equipo", equipos_disponibles if equipos_disponibles else ["General"])
-                        em = cf2.text_input("Correo Electrónico")
-                        
-                        submitted = st.form_submit_button("Confirmar Reserva", type="primary", disabled=(disponibles <= 0))
-                        
-                        if submitted:
+                    em = cf2.text_input("Correo Electrónico")
+                    
+                    submitted = st.form_submit_button("Confirmar Reserva", type="primary", disabled=(disponibles <= 0))
+                    
+                    if submitted:
                         if not em:
                             st.error("Por favor completa el correo electrónico.")
                         elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', em):
                             st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
-                            elif user_has_reservation(conn, em, str(fe)):
-                                st.error("Ya tienes una reserva registrada para esta fecha.")
+                        elif user_has_reservation(conn, em, str(fe)):
+                            st.error("Ya tienes una reserva registrada para esta fecha.")
                         elif count_monthly_free_spots(conn, area_equipo, fe) >= 2:
                             st.error(f"El equipo/área '{area_equipo}' ha alcanzado el límite de 2 reservas mensuales.")
-                            elif disponibles <= 0:
-                                st.error("Lo sentimos, el cupo se acaba de agotar.")
-                            else:
-                            # Usar el área/equipo como nombre (el correo identifica al usuario)
+                        elif disponibles <= 0:
+                            st.error("Lo sentimos, el cupo se acaba de agotar.")
+                        else:
                             add_reservation(conn, area_equipo, em, pi, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
                             msg = f"✅ Reserva Confirmada:\n\n- Área/Equipo: {area_equipo}\n- Fecha: {fe}\n- Piso: {pi}\n- Tipo: Puesto Flex"
-                                st.success(msg)
+                            st.success(msg)
+                            
                             email_sent = send_reservation_email(em, "Confirmación Puesto", msg.replace("\n","<br>"))
                             if email_sent:
                                 st.info("📧 Correo de confirmación enviado")
                             else:
                                 st.warning("⚠️ No se pudo enviar el correo. Verifica la configuración SMTP.")
-                                st.rerun()
+                            
+                            st.rerun()
 
     # ---------------------------------------------------------
     # OPCIÓN 2: RESERVAR SALA
@@ -1319,8 +1314,8 @@ elif menu == "Reservas":
                 "Sala Reuniones Piso 2",
                 "Sala Reuniones Piso 3"
             ]
-        
-        c_sala, c_fecha = st.columns(2)
+            
+            c_sala, c_fecha = st.columns(2)
             sl = c_sala.selectbox("Selecciona Sala", salas_disponibles, key="sala_sel")
             
             # Determinar piso desde el nombre de la sala
@@ -1369,7 +1364,6 @@ elif menu == "Reservas":
                     r_start = r.get('start_time', '')
                     r_end = r.get('end_time', '')
                     if r_start and r_end:
-                        # Verificar traslape
                         if check_room_conflict([r], str(fe_s), sl, hora_inicio, hora_fin):
                             ocupado = True
                             break
@@ -1399,40 +1393,38 @@ elif menu == "Reservas":
                     st.markdown("---")
                     st.markdown(f"### Confirmar Reserva: {h_inicio} - {h_fin}")
                     
-        with st.form("form_sala"):
+                    with st.form("form_sala"):
                         st.info(f"**Equipo/Área:** {equipo_seleccionado}\n\n**Sala:** {sl}\n\n**Fecha:** {fe_s}\n\n**Horario:** {h_inicio} - {h_fin}")
-            
+                        
                         e_s = st.text_input("Correo Electrónico", key="email_sala")
                         
                         sub_sala = st.form_submit_button("✅ Confirmar Reserva", type="primary")
-            
-            if sub_sala:
-                            if not e_s:
-                                st.error("Por favor ingresa tu correo electrónico.")
-                            elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', e_s):
-                                st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
-                            elif check_room_conflict(get_room_reservations_df(conn).to_dict("records"), str(fe_s), sl, h_inicio, h_fin):
-                    st.error("❌ Conflicto: La sala ya está ocupada en ese horario.")
-                                del st.session_state['selected_slot']
-                else:
-                                # Usar equipo como nombre, correo identifica al usuario
-                                add_room_reservation(conn, equipo_seleccionado, e_s, pi_s, sl, str(fe_s), h_inicio, h_fin, datetime.datetime.now(datetime.timezone.utc).isoformat())
-                                msg = f"✅ Sala Confirmada:\n\n- Equipo/Área: {equipo_seleccionado}\n- Sala: {sl}\n- Fecha: {fe_s}\n- Horario: {h_inicio} - {h_fin}"
-                    st.success(msg)
-                                
-                                # Enviar correo de confirmación
-                                if e_s: 
-                                    try:
-                                        email_sent = send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
-                                        if email_sent:
-                                            st.info("📧 Correo de confirmación enviado")
-                                        else:
-                                            st.warning("⚠️ No se pudo enviar el correo. Verifica la configuración SMTP.")
-                                    except Exception as email_error:
-                                        st.warning(f"⚠️ Error al enviar correo: {email_error}")
-                                
-                                del st.session_state['selected_slot']
-                                st.rerun()
+                    
+                    if sub_sala:
+                        if not e_s:
+                            st.error("Por favor ingresa tu correo electrónico.")
+                        elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', e_s):
+                            st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
+                        elif check_room_conflict(get_room_reservations_df(conn).to_dict("records"), str(fe_s), sl, h_inicio, h_fin):
+                            st.error("❌ Conflicto: La sala ya está ocupada en ese horario.")
+                            del st.session_state['selected_slot']       
+                        else:
+                            add_room_reservation(conn, equipo_seleccionado, e_s, pi_s, sl, str(fe_s), h_inicio, h_fin, datetime.datetime.now(datetime.timezone.utc).isoformat())
+                            msg = f"✅ Sala Confirmada:\n\n- Equipo/Área: {equipo_seleccionado}\n- Sala: {sl}\n- Fecha: {fe_s}\n- Horario: {h_inicio} - {h_fin}"
+                            st.success(msg)
+                            
+                            if e_s:
+                                try:
+                                    email_sent = send_reservation_email(e_s, "Reserva Sala", msg.replace("\n","<br>"))
+                                    if email_sent:
+                                        st.info("📧 Correo de confirmación enviado")
+                                    else:
+                                        st.warning("⚠️ No se pudo enviar el correo. Verifica la configuración SMTP.")
+                                except Exception as email_error:
+                                    st.warning(f"⚠️ Error al enviar correo: {email_error}")
+                            
+                            del st.session_state['selected_slot']
+                            st.rerun()
 
     # ---------------------------------------------------------
     # OPCIÓN 3: GESTIONAR (ANULAR Y VER TODO)
@@ -1539,18 +1531,18 @@ elif menu == "Administrador":
         
         # SELECTOR DE ESTRATEGIA (solo si no se ignoran parámetros)
         if not ignore_params:
-        estrategia = c_strat.radio(
-            "Estrategia Base:",
-            ["🎲 Aleatorio (Recomendado para Optimizar)", "🧩 Tetris (Grandes primero)", "🐜 Relleno (Pequeños primero)"],
-            help="Aleatorio da mejores resultados al usar Auto-Optimizar porque prueba más combinaciones distintas."
-        )
-        
-        strat_map = {
-            "🧩 Tetris (Grandes primero)": "size_desc",
-            "🎲 Aleatorio (Recomendado para Optimizar)": "random",
-            "🐜 Relleno (Pequeños primero)": "size_asc"
-        }
-        sel_strat_code = strat_map[estrategia]
+            estrategia = c_strat.radio(
+                "Estrategia Base:",
+                ["🎲 Aleatorio (Recomendado para Optimizar)", "🧩 Tetris (Grandes primero)", "🐜 Relleno (Pequeños primero)"],
+                help="Aleatorio da mejores resultados al usar Auto-Optimizar porque prueba más combinaciones distintas."
+            )
+            
+            strat_map = {
+                "🧩 Tetris (Grandes primero)": "size_desc",
+                "🎲 Aleatorio (Recomendado para Optimizar)": "random",
+                "🐜 Relleno (Pequeños primero)": "size_asc"
+            }
+            sel_strat_code = strat_map[estrategia]
         else:
             sel_strat_code = "random"  # Para distribuciones ideales siempre usamos random
             c_strat.info("💡 Modo Distribución Ideal activado")
@@ -1565,37 +1557,31 @@ elif menu == "Administrador":
         # 1. CARGA DEL ARCHIVO
         if up:
             try:
-                # Botón inicial para procesar
                 if st.button("📂 Procesar Inicial", type="primary"):
                     try:
-                        # Leer Excel con encoding correcto para tildes
                         df_eq = pd.read_excel(up, "Equipos", engine='openpyxl')
                         if not ignore_params:
                             df_pa = pd.read_excel(up, "Parámetros", engine='openpyxl')
                         else:
-                            # Crear DataFrame vacío si se ignoran parámetros
                             df_pa = pd.DataFrame()
-                    
-                    st.session_state['excel_equipos'] = df_eq
-                    st.session_state['excel_params'] = df_pa
+                        
+                        st.session_state['excel_equipos'] = df_eq
+                        st.session_state['excel_params'] = df_pa
                         st.session_state['ignore_params'] = ignore_params
                         
                         if ignore_params:
-                            # Generar múltiples opciones ideales
                             st.info("🔄 Generando opciones ideales de distribución...")
                             ideal_options = generate_ideal_distributions(df_eq, df_pa, num_options=3)
                             st.session_state['ideal_options'] = ideal_options
                             st.session_state['selected_ideal_option'] = 0
-                            # Usar la primera opción como propuesta inicial
                             rows, deficit = ideal_options[0]['rows'], ideal_options[0]['deficit']
                         else:
-                            # Generar propuesta inicial normal
                             rows, deficit = get_distribution_proposal(df_eq, df_pa, strategy=sel_strat_code, ignore_params=False)
                         
-                    st.session_state['proposal_rows'] = rows
-                    st.session_state['proposal_deficit'] = deficit
-                    st.session_state['last_optimization_stats'] = None
-                    st.rerun()
+                        st.session_state['proposal_rows'] = rows
+                        st.session_state['proposal_deficit'] = deficit
+                        st.session_state['last_optimization_stats'] = None
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error al leer el Excel: {e}")
                         import traceback
@@ -1633,10 +1619,9 @@ elif menu == "Administrador":
                 n_def = len(option_data['deficit']) if option_data['deficit'] else 0
                 st.success(f"✅ Opción {selected_idx + 1} seleccionada - Déficits: {n_def}")
             else:
-            # Mostrar estadísticas de la optimización si existen
                 if st.session_state.get('last_optimization_stats'):
-                stats = st.session_state['last_optimization_stats']
-                st.info(f"✨ **Resultado Optimizado:** Se probaron {stats['iterations']} combinaciones. Se eligió la que menos castiga repetidamente al mismo equipo.")
+                    stats = st.session_state['last_optimization_stats']
+                    st.info(f"✨ **Resultado Optimizado:** Se probaron {stats['iterations']} combinaciones. Se eligió la que menos castiga repetidamente al mismo equipo.")
             
             # --- SECCIÓN DE RESULTADOS ---
             n_def = len(st.session_state['proposal_deficit']) if st.session_state['proposal_deficit'] else 0
@@ -1781,17 +1766,17 @@ elif menu == "Administrador":
         
         with col_left:
             p_sel = st.selectbox("Piso", pisos_list, key="editor_piso")
-        p_num = p_sel.replace("Piso ", "").strip()
+            p_num = p_sel.replace("Piso ", "").strip()
         
             # Búsqueda de Archivo
             file_base = f"piso{p_num}"
-        pim = PLANOS_DIR / f"{file_base}.png"
-        if not pim.exists(): 
-            pim = PLANOS_DIR / f"{file_base}.jpg"
+            pim = PLANOS_DIR / f"{file_base}.png"
+            if not pim.exists(): 
+                pim = PLANOS_DIR / f"{file_base}.jpg"
             if not pim.exists():
-            pim = PLANOS_DIR / f"Piso{p_num}.png"
+                pim = PLANOS_DIR / f"Piso{p_num}.png"
         
-        if pim.exists():
+            if pim.exists():
                 try:
                     # Cargar zonas existentes para este piso
                     existing_zones = zonas.get(p_sel, [])
@@ -1840,9 +1825,6 @@ elif menu == "Administrador":
                                 st.rerun()
                             else:
                                 st.error("❌ Error al eliminar las zonas")
-                            st.success("✅ Todas las zonas eliminadas")
-                            st.session_state[f"confirm_clear_{p_sel}"] = False
-                            st.rerun()
                         else:
                             st.session_state[f"confirm_clear_{p_sel}"] = True
                             st.warning("⚠️ Haz clic de nuevo para confirmar la eliminación de TODAS las zonas")
@@ -1954,7 +1936,7 @@ elif menu == "Administrador":
             tn = st.selectbox("Equipo / Sala", eqs, key=f"team_{p_sel}")
             tc = st.color_picker("Color", "#00A04A", key=f"color_{p_sel}")
 
-if tn and tn in current_seats_dict:
+            if tn and tn in current_seats_dict:
                 st.info(f"📊 Cupos: {current_seats_dict[tn]}")
             
             st.markdown("---")
@@ -1997,7 +1979,7 @@ if tn and tn in current_seats_dict:
                                 if save_zones(zonas):
                                     st.success("✅ Zona actualizada")
                                     st.rerun()
-    else:
+                                else:
                                     st.error("❌ Error al guardar la zona")
                         
                         with col_edit2:
@@ -2011,7 +1993,7 @@ if tn and tn in current_seats_dict:
                 
                 # Leyenda de colores
                 st.markdown("#### 🎨 Leyenda de Colores")
-    for i, z in enumerate(zonas[p_sel]):
+                for i, z in enumerate(zonas[p_sel]):
                     col_leg1, col_leg2 = st.columns([1, 4])
                     with col_leg1:
                         st.markdown(f'<div style="width:30px;height:30px;background-color:{z.get("color", "#00A04A")};border:1px solid #ccc;"></div>', unsafe_allow_html=True)
@@ -2032,70 +2014,71 @@ if tn and tn in current_seats_dict:
             """)
         
         # Sección de personalización de título y leyenda (fuera de las columnas)
-            st.divider()
-            st.subheader("Personalización Título y Leyenda")
-            with st.expander("🎨 Editar Estilos", expanded=True):
+        st.divider()
+        st.subheader("Personalización Título y Leyenda")
+        with st.expander("🎨 Editar Estilos", expanded=True):
             tm = st.text_input("Título Principal", f"Distribución {p_sel}", key=f"title_{p_sel}")
             ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}", key=f"subtitle_{p_sel}")
-                
-                align_options = ["Izquierda", "Centro", "Derecha"]
-
-                st.markdown("##### Estilos del Título Principal")
-                cf1, cf2, cf3 = st.columns(3)
+            
+            align_options = ["Izquierda", "Centro", "Derecha"]
+            
+            st.markdown("##### Estilos del Título Principal")
+            cf1, cf2, cf3 = st.columns(3)
             ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_t_{p_sel}")
             fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key=f"size_t_{p_sel}")
             align = cf3.selectbox("Alineación (Título)", align_options, index=1, key=f"align_{p_sel}")
-
-                st.markdown("---")
-                st.markdown("##### Estilos del Subtítulo")
-                cs1, cs2, cs3 = st.columns(3)
+            
+            st.markdown("---")
+            st.markdown("##### Estilos del Subtítulo")
+            cs1, cs2, cs3 = st.columns(3)
             ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_s_{p_sel}")
             fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key=f"size_s_{p_sel}")
             align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1, key=f"align_s_{p_sel}")
-
-                st.markdown("---")
-                st.markdown("##### Estilos de la Leyenda")
-                cl1, cl2, cl3 = st.columns(3)
+            
+            st.markdown("---")
+            st.markdown("##### Estilos de la Leyenda")
+            cl1, cl2, cl3 = st.columns(3)
             ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_l_{p_sel}", index=0)
             fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key=f"size_l_{p_sel}")
             align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0, key=f"align_l_{p_sel}")
-                
-                st.markdown("---")
-                cg1, cg2, cg3, cg4 = st.columns(4) 
-            lg = cg1.checkbox("Logo", True, key=f"chk_logo_{p_sel}"); 
-            ln = cg2.checkbox("Mostrar Leyenda", True, key=f"chk_legend_{p_sel}");
+            
+            st.markdown("---")
+            cg1, cg2, cg3, cg4 = st.columns(4) 
+            lg = cg1.checkbox("Logo", True, key=f"chk_logo_{p_sel}")
+            ln = cg2.checkbox("Mostrar Leyenda", True, key=f"chk_legend_{p_sel}")
             align_logo = cg3.selectbox("Alineación Logo", align_options, index=0, key=f"logo_align_{p_sel}")
             lw = cg4.slider("Ancho Logo", 50, 300, 150, key=f"logo_w_{p_sel}")
-                
-                cc1, cc2 = st.columns(2)
-            bg = cc1.color_picker("Fondo Header", "#FFFFFF", key=f"bg_{p_sel}"); tx = cc2.color_picker("Color Texto", "#000000", key=f"tx_{p_sel}")
-
+            
+            cc1, cc2 = st.columns(2)
+            bg = cc1.color_picker("Fondo Header", "#FFFFFF", key=f"bg_{p_sel}")
+            tx = cc2.color_picker("Color Texto", "#000000", key=f"tx_{p_sel}")
+        
         fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"], key=f"fmt_{p_sel}")
-            f_code = "PNG" if "PNG" in fmt_sel else "PDF"
+        f_code = "PNG" if "PNG" in fmt_sel else "PDF"
             
         # Preparar configuración
-                conf = {
-                    "title_text": tm,
-                    "subtitle_text": ts,
-                    "title_font": ff_t,
-                    "title_size": fs_t,
-                    "subtitle_font": ff_s,
-                    "subtitle_size": fs_s,
-                    "legend_font": ff_l,
-                    "legend_size": fs_l,
-                    "alignment": align, 
-                    "subtitle_align": align_s, 
-                    "legend_align": align_l, 
-                    "bg_color": bg, 
-                    "title_color": tx, 
-                    "subtitle_color": "#666666", 
-                    "use_logo": lg, 
-                    "use_legend": ln, 
-                    "logo_width": lw,
-                    "logo_align": align_logo
-                }
+        conf = {
+            "title_text": tm,
+            "subtitle_text": ts,
+            "title_font": ff_t,
+            "title_size": fs_t,
+            "subtitle_font": ff_s,
+            "subtitle_size": fs_s,
+            "legend_font": ff_l,
+            "legend_size": fs_l,
+            "alignment": align, 
+            "subtitle_align": align_s, 
+            "legend_align": align_l, 
+            "bg_color": bg, 
+            "title_color": tx, 
+            "subtitle_color": "#666666", 
+            "use_logo": lg, 
+            "use_legend": ln, 
+            "logo_width": lw,
+            "logo_align": align_logo
+        }
         # Guardar config en session_state para usarla en dossier PDF
-                st.session_state['last_style_config'] = conf
+        st.session_state['last_style_config'] = conf
         
         # Obtener current_seats_dict
         current_seats_dict = {}
@@ -2125,8 +2108,8 @@ if tn and tn in current_seats_dict:
                     if not df_d.empty:
                         subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
                         current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                
-                out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
+                    
+                    out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
                     if out and Path(out).exists(): 
                         st.success(f"✅ Vista previa generada correctamente!")
                         st.rerun()
@@ -2138,10 +2121,10 @@ if tn and tn in current_seats_dict:
                     st.code(traceback.format_exc())
         
         # Mostrar vista previa si existe
-            ds = d_sel.lower().replace("é","e").replace("á","a")
-            fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
-            fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
-            
+        ds = d_sel.lower().replace("é","e").replace("á","a")
+        fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
+        fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
+        
         if fpng.exists() or fpdf.exists():
             st.markdown("### 📊 Vista Previa")
             if fpng.exists(): 
