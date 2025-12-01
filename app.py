@@ -917,17 +917,27 @@ settings = st.session_state["app_settings"]
 site_title = settings.get("site_title", "Gestor de Puestos y Salas — ACHS Servicios")
 global_logo_path = settings.get("logo_path", "static/logo.png")
 
-if os.path.exists(global_logo_path):
-    try:
+# CORREGIDO: Cargar logo con manejo robusto de errores
+try:
+    logo_path_abs = Path(global_logo_path).resolve()
+    if logo_path_abs.exists() and logo_path_abs.is_file():
         c1, c2 = st.columns([1, 5])
-        c1.image(global_logo_path, width=150, use_container_width=False)
+        c1.image(str(logo_path_abs), width=150, use_container_width=False)
         c2.title(site_title)
-    except Exception as e:
-        # Si hay error al cargar el logo, mostrar solo el título
-        st.title(site_title)
-        st.warning(f"⚠️ No se pudo cargar el logo: {str(e)}")
-else:
+    else:
+        # Intentar con ruta relativa
+        if os.path.exists(global_logo_path):
+            c1, c2 = st.columns([1, 5])
+            c1.image(global_logo_path, width=150, use_container_width=False)
+            c2.title(site_title)
+        else:
+            st.title(site_title)
+            if global_logo_path != "static/logo.png":
+                st.info(f"💡 Logo configurado en: {global_logo_path} (archivo no encontrado)")
+except Exception as e:
+    # Si hay error al cargar el logo, mostrar solo el título
     st.title(site_title)
+    st.warning(f"⚠️ No se pudo cargar el logo desde {global_logo_path}: {str(e)}")
 
 # ---------------------------------------------------------
 # MENÚ PRINCIPAL
@@ -994,8 +1004,92 @@ if menu == "Vista pública":
             # MODIFICADO: Fix use_container_width
             st.dataframe(df_view, hide_index=True, width=None, use_container_width=True)
             
-            st.subheader("Cupos libres por piso y día")
-            st.dataframe(lib, hide_index=True, width=None, use_container_width=True)
+            st.subheader("Calendario Mensual de Reservas por Piso")
+            
+            # Obtener reservas de cupos libres
+            all_res = list_reservations_df(conn)
+            
+            # Obtener mes actual o seleccionado
+            mes_actual = datetime.date.today().replace(day=1)
+            mes_sel = st.selectbox("Seleccionar Mes", 
+                                   [mes_actual + datetime.timedelta(days=30*i) for i in range(-2, 4)],
+                                   format_func=lambda x: x.strftime("%B %Y"),
+                                   index=2)
+            
+            # Crear calendario por piso
+            pisos_cal = sort_floors(pisos_disponibles)
+            
+            for piso_cal in pisos_cal:
+                st.markdown(f"### 📅 {piso_cal}")
+                
+                # Obtener reservas de este piso en el mes seleccionado
+                reservas_piso = []
+                if not all_res.empty:
+                    mask_piso = (all_res["piso"] == piso_cal) & (all_res["team_area"] == "Cupos libres")
+                    for _, r in all_res[mask_piso].iterrows():
+                        try:
+                            fecha_res = pd.to_datetime(r["reservation_date"])
+                            if fecha_res.year == mes_sel.year and fecha_res.month == mes_sel.month:
+                                reservas_piso.append({
+                                    "fecha": fecha_res,
+                                    "equipo": r["user_name"],
+                                    "correo": r["user_email"]
+                                })
+                        except:
+                            pass
+                
+                # Crear calendario HTML
+                import calendar
+                cal = calendar.monthcalendar(mes_sel.year, mes_sel.month)
+                
+                # Crear HTML para el calendario
+                html_cal = f"""
+                <div style="margin: 20px 0;">
+                    <table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
+                        <thead>
+                            <tr style="background-color: #00A04A; color: white;">
+                                <th style="padding: 10px; border: 1px solid #ddd;">Lun</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Mar</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Mié</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Jue</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Vie</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Sáb</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Dom</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                """
+                
+                for week in cal:
+                    html_cal += "<tr>"
+                    for day in week:
+                        if day == 0:
+                            html_cal += '<td style="padding: 10px; border: 1px solid #ddd; background-color: #f5f5f5;"></td>'
+                        else:
+                            fecha_dia = datetime.date(mes_sel.year, mes_sel.month, day)
+                            # Buscar reservas para este día
+                            reservas_dia = [r for r in reservas_piso if r["fecha"].date() == fecha_dia]
+                            
+                            if reservas_dia:
+                                equipos_str = ", ".join([r["equipo"] for r in reservas_dia])
+                                html_cal += f'''
+                                <td style="padding: 10px; border: 1px solid #ddd; background-color: #e8f5e9; font-size: 11px;">
+                                    <strong>{day}</strong><br>
+                                    <span style="color: #006B32;">{equipos_str}</span>
+                                </td>
+                                '''
+                            else:
+                                html_cal += f'<td style="padding: 10px; border: 1px solid #ddd;">{day}</td>'
+                    html_cal += "</tr>"
+                
+                html_cal += """
+                        </tbody>
+                    </table>
+                </div>
+                """
+                
+                st.markdown(html_cal, unsafe_allow_html=True)
+                st.markdown("---")
         
         with t3:
             st.subheader("Reservas de Salas de Reuniones")
@@ -1144,6 +1238,8 @@ elif menu == "Reservas":
                     if submitted:
                         if not em:
                             st.error("Por favor completa el correo electrónico.")
+                        elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', em):
+                            st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
                         elif user_has_reservation(conn, em, str(fe)):
                             st.error("Ya tienes una reserva registrada para esta fecha.")
                         elif count_monthly_free_spots(conn, area_equipo, fe) >= 2:
@@ -1282,6 +1378,8 @@ elif menu == "Reservas":
                         if sub_sala:
                             if not e_s:
                                 st.error("Por favor ingresa tu correo electrónico.")
+                            elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', e_s):
+                                st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
                             elif check_room_conflict(get_room_reservations_df(conn).to_dict("records"), str(fe_s), sl, h_inicio, h_fin):
                                 st.error("❌ Conflicto: La sala ya está ocupada en ese horario.")
                                 del st.session_state['selected_slot']
@@ -1814,6 +1912,17 @@ elif menu == "Administrador":
                         pass
                     except Exception as e:
                         pass
+                    
+                    # Botón manual de guardado como respaldo
+                    if st.button("💾 Guardar Zonas Manualmente", key=f"manual_save_{p_sel}"):
+                        try:
+                            zones_data = json.loads(zones_json_hidden)
+                            zonas[p_sel] = zones_data
+                            save_zones(zonas)
+                            st.success(f"✅ {len(zones_data)} zonas guardadas manualmente!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
                     
                     st.info("💡 **Guardado Automático:** Dibuja zonas y haz clic en '💾 Guardar Zonas' en el editor. Las zonas se guardarán automáticamente.")
                             
