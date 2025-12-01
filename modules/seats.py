@@ -41,14 +41,12 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     if not (col_piso and col_equipo and col_personas and col_minimos):
         return [], []
 
-    # 3. Procesar Parámetros (LECTURA OBLIGATORIA DE CAPACIDAD)
+    # 3. Procesar Parámetros (Lectura Robusta)
     capacidad_pisos = {}
     reglas_full_day = {}
-    
-    # REGLA DE ORO: 2 Cupos Libres SIEMPRE (Ignoramos lo que diga el Excel sobre cupos libres)
     RESERVA_OBLIGATORIA = 2 
 
-    # Detectar columnas de parámetros
+    # Intentar leer columnas de parámetros
     col_param = next((c for c in parametros_df.columns if 'criterio' in normalize_text(c) or 'parametro' in normalize_text(c)), '')
     col_valor = next((c for c in parametros_df.columns if 'valor' in normalize_text(c)), '')
 
@@ -57,18 +55,14 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
             p = str(row.get(col_param, '')).strip().lower()
             v = str(row.get(col_valor, '')).strip()
             
-            # --- ESTO SE LEE SIEMPRE (Incluso si ignore_params=True) ---
-            # Leemos la capacidad física real del edificio (Líneas 2, 3, 4 de tu imagen)
+            # Leer capacidad física (SIEMPRE)
             if "cupos totales" in p or "capacidad" in p:
                 match_p = re.search(r'piso\s+(\d+)', p)
                 match_c = re.search(r'(\d+)', v)
-                
-                # Si encontramos un número de piso y un valor numérico
                 if match_p and match_c: 
                     capacidad_pisos[match_p.group(1)] = int(match_c.group(1))
             
-            # --- ESTO SOLO SE LEE SI NO IGNORAMOS PARAMETROS ---
-            # Reglas de negocio (Días completos, mínimos, etc.)
+            # Leer reglas (Solo si no se ignoran)
             if not ignore_params:
                 if "dia completo" in p or "día completo" in p:
                     equipo_nombre = re.split(r'd[ií]a completo\s+', p, flags=re.IGNORECASE)[-1].strip()
@@ -80,20 +74,17 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
     for piso_raw in pisos_unicos:
         piso_str = str(int(piso_raw)) if isinstance(piso_raw, (int, float)) else str(piso_raw)
         
-        # --- DEFINICIÓN DE CAPACIDAD REAL ---
-        # 1. Buscamos en lo que leímos del Excel (prioridad absoluta)
+        # DEFINIR CAPACIDAD REAL
         if piso_str in capacidad_pisos:
             cap_total_real = capacidad_pisos[piso_str]
         else:
-            # 2. Si NO estaba en el Excel, sumamos las personas (Fallback)
+            # Fallback: Suma de personas si no hay parámetro
             df_temp = equipos_df[equipos_df[col_piso] == piso_raw]
             cap_total_real = int(df_temp[col_personas].sum()) if col_personas else 50
 
-        # --- TECHO DURO PARA EQUIPOS ---
-        # Ejemplo: Excel dice 38. Reserva es 2.
-        # hard_cap_equipos = 38 - 2 = 36.
-        # Los equipos nunca podrán pasar de 36.
-        hard_cap_equipos = max(0, cap_total_real - RESERVA_OBLIGATORIA)
+        # LÍMITE ESTRICTO PARA EQUIPOS
+        # Si Total es 38, el Limite es 36.
+        hard_limit = max(0, cap_total_real - RESERVA_OBLIGATORIA)
         
         df_piso = equipos_df[equipos_df[col_piso] == piso_raw].copy()
 
@@ -119,7 +110,7 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 base_demand = max(2, min_req) if per >= 2 else per
                 for dia in dias_semana: capacidad_fija_por_dia[dia] += base_demand
 
-        capacidad_libre_pre = {d: max(0, hard_cap_equipos - capacidad_fija_por_dia[d]) for d in dias_semana}
+        capacidad_libre_pre = {d: max(0, hard_limit - capacidad_fija_por_dia[d]) for d in dias_semana}
         
         for item_flex in equipos_flexibles:
             best_day = None; max_libre = -float('inf')
@@ -140,7 +131,6 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 nm = str(r[col_equipo]).strip()
                 per = int(r[col_personas]) if pd.notna(r[col_personas]) else 0
                 min_excel = int(r[col_minimos]) if col_minimos and pd.notna(r[col_minimos]) else 0
-                
                 target_min = max(2, min_excel)
                 if target_min > per: target_min = per
                 
@@ -158,37 +148,70 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                 if is_fd_today: fd_teams.append(t)
                 else: normal_teams.append(t)
 
-            # CONTROL DE CAPACIDAD DEL DÍA
+            # CONTROL DE CAPACIDAD (INTENTO DE LLENADO)
             used_cap = 0
             
-            # 1. Asignar Full Day (Prioridad)
+            # 1. Asignar Full Day
             for t in fd_teams:
-                available = hard_cap_equipos - used_cap
-                to_assign = min(t['per'], available)
-                t['asig'] = to_assign
-                used_cap += to_assign
+                t['asig'] = t['per']
+                used_cap += t['asig']
 
-            # 2. Rotación Equitativa (Para no castigar siempre a los mismos)
+            # 2. Rotación
             if len(normal_teams) > 0:
                 shift = dia_idx % len(normal_teams)
                 normal_teams = normal_teams[shift:] + normal_teams[:shift]
 
-            # 3. Reparto Round Robin (Equitativo)
+            # 3. Llenado Round Robin (Sin limite estricto aquí, dejamos que se pasen para luego cortar)
+            # Esto permite que el algoritmo "intente" llenar todo, y luego la guillotina ajusta.
             keep_going = True
-            while keep_going and used_cap < hard_cap_equipos:
+            while keep_going:
                 keep_going = False
                 for t in normal_teams:
-                    if used_cap < hard_cap_equipos and t['asig'] < t['per']:
+                    if t['asig'] < t['per']: # Si le falta gente
                         t['asig'] += 1
                         used_cap += 1
-                        keep_going = True
+                        # Solo paramos si ya nos pasamos mucho, pero dejamos un margen para que la guillotina decida
+                        if used_cap < hard_limit + 10: 
+                            keep_going = True
 
-            # 4. Cálculo de Déficit
-            for t in normal_teams + fd_teams:
+            # --- LA GUILLOTINA: AJUSTE FORZADO ---
+            # Sumamos lo que asignamos realmente
+            all_teams_day = fd_teams + normal_teams
+            total_asignado = sum(t['asig'] for t in all_teams_day)
+            
+            # Si nos pasamos del límite (Total - 2)
+            exceso = total_asignado - hard_limit
+            
+            if exceso > 0:
+                # Hay que quitar cupos.
+                # Estrategia: Quitar a los que más tienen asignado (para ser justos y no dejar a uno en 0)
+                # O quitar en orden inverso a la asignación.
+                
+                # Iteramos quitando 1 cupo a la vez hasta cumplir la meta
+                while exceso > 0:
+                    # Candidatos: Equipos normales con cupos > 0 (No tocamos Full Day si es posible)
+                    candidatos = [t for t in normal_teams if t['asig'] > 0]
+                    
+                    if not candidatos:
+                        # Si no hay normales, tocamos full day (caso extremo)
+                        candidatos = [t for t in fd_teams if t['asig'] > 0]
+                    
+                    if not candidatos: break # No se puede quitar más
+                    
+                    # Ordenar por quién tiene más cupos asignados (para quitarle al que más tiene)
+                    candidatos.sort(key=lambda x: x['asig'], reverse=True)
+                    
+                    victim = candidatos[0]
+                    victim['asig'] -= 1
+                    total_asignado -= 1
+                    exceso -= 1
+
+            # 4. Cálculo de Déficit y Reporte Final
+            for t in all_teams_day:
                 goal = t['target_min']
                 if t['asig'] < t['per']:
                     t['deficit'] = t['per'] - t['asig']
-                    reason = "Falta espacio físico (Reserva priorizada)"
+                    reason = "Reserva de cupos libres priorizada"
                     if t['asig'] < goal: reason = "No alcanzó el mínimo requerido"
                     
                     deficit_report.append({
@@ -198,19 +221,16 @@ def compute_distribution_from_excel(equipos_df, parametros_df, cupos_reserva=2, 
                     })
 
             # 5. INSERCIÓN DE CUPOS LIBRES
-            # Calculamos lo que sobró respecto al TOTAL REAL (ej. 38)
-            # Como los equipos toparon en 36, el remanente mínimo será 2.
-            # Si los equipos eran pequeños y solo usaron 20, el remanente será 18.
-            remanente_real = cap_total_real - used_cap
+            # Ahora es seguro: total_asignado <= hard_limit (Total - 2)
+            # Por lo tanto, el remanente es >= 2.
+            remanente_real = cap_total_real - total_asignado
             
-            # Guardar filas de equipos
-            all_teams = fd_teams + normal_teams
-            for t in all_teams:
+            # Guardar filas
+            for t in all_teams_day:
                 if t['asig'] > 0:
                     pct = round((t['asig'] / t['per']) * 100, 1) if t['per'] > 0 else 0.0
                     rows.append({"piso": f"Piso {piso_str}", "equipo": t['eq'], "dia": dia, "cupos": int(t['asig']), "pct": pct})
             
-            # Guardar fila de Cupos Libres (Siempre será >= 2)
             if remanente_real > 0:
                 pct_libres = round((remanente_real / cap_total_real) * 100, 1)
                 rows.append({"piso": f"Piso {piso_str}", "equipo": "Cupos libres", "dia": dia, "cupos": int(remanente_real), "pct": pct_libres})
