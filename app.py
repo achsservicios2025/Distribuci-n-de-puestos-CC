@@ -909,11 +909,8 @@ if "db_initialized" not in st.session_state:
 
 apply_appearance_styles(conn)
 
-# MODIFICADO: Cargar Settings una sola vez
-if "app_settings" not in st.session_state:
-    st.session_state["app_settings"] = get_all_settings(conn)
-
-settings = st.session_state["app_settings"]
+# Obtener settings actualizados en cada carga (permitir que logo y estilos cambien al instante)
+settings = get_all_settings(conn)
 
 # Definir variables
 site_title = settings.get("site_title", "Gestor de Puestos y Salas — ACHS Servicios")
