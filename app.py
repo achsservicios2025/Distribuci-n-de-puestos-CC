@@ -39,7 +39,9 @@ if hasattr(streamlit.elements.lib.image_utils, "image_to_url"):
     streamlit.elements.lib.image_utils.image_to_url = _patched_image_to_url
 
 
-def resolve_logo_source(raw_path: str | None, logo_b64: str | None):
+from typing import Optional
+
+def resolve_logo_source(raw_path: Optional[str], logo_b64: Optional[str]):
     """
     Devuelve bytes o URL del logo.
     Prioriza base64 (subido desde admin), luego URL, luego rutas locales.
@@ -2752,6 +2754,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
