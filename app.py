@@ -1602,7 +1602,7 @@ elif menu == "Reservas":
 # ---------------------------------------------------------
 elif opcion_reserva == "📋 Mis Reservas y Listados":
 
-# --- SECCION 1: BUSCADOR PARA ANULAR ---
+    # --- SECCION 1: BUSCADOR PARA ANULAR ---
     st.subheader("Buscar y Cancelar mis reservas")
     q = st.text_input("Ingresa tu Correo o Nombre para buscar:")
 
@@ -1613,7 +1613,6 @@ elif opcion_reserva == "📋 Mis Reservas y Listados":
         dp = list_reservations_df(conn)
         ds = get_room_reservations_df(conn)
 
-        # Blindaje: asegurar columnas esperadas (por si vienen con otros nombres)
         def ensure_cols(df):
             if df is None or df.empty:
                 return df
@@ -1640,7 +1639,7 @@ elif opcion_reserva == "📋 Mis Reservas y Listados":
 
         required = {"user_name", "user_email"}
         if (dp is not None and not dp.empty and not required.issubset(set(dp.columns))) or \
-            (ds is not None and not ds.empty and not required.issubset(set(ds.columns))):
+           (ds is not None and not ds.empty and not required.issubset(set(ds.columns))):
             st.error(f"Faltan columnas para buscar. Encontré en Puestos: {list(dp.columns)} | en Salas: {list(ds.columns)}")
             st.stop()
 
@@ -1681,15 +1680,15 @@ elif opcion_reserva == "📋 Mis Reservas y Listados":
 
     st.markdown("---")
 
-        # --- SECCION 2: VER TODO ---
-        with st.expander("Ver Listado General de Reservas", expanded=True):
-            st.subheader("Reserva de puestos")
-            st.dataframe(clean_reservation_df(list_reservations_df(conn)), hide_index=True, use_container_width=True)
+    # --- SECCION 2: VER TODO ---
+    with st.expander("Ver Listado General de Reservas", expanded=True):
+        st.subheader("Reserva de puestos")
+        st.dataframe(clean_reservation_df(list_reservations_df(conn)), hide_index=True, use_container_width=True)
 
-            st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            st.subheader("Reserva de salas")
-            st.dataframe(clean_reservation_df(get_room_reservations_df(conn), "sala"), hide_index=True, use_container_width=True)
+        st.subheader("Reserva de salas")
+        st.dataframe(clean_reservation_df(get_room_reservations_df(conn), "sala"), hide_index=True, use_container_width=True)
 
 # ==========================================
 # E. ADMINISTRADOR
@@ -2735,6 +2734,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
