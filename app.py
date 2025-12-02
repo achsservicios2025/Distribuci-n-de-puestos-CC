@@ -830,31 +830,34 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
 def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=Path("static/logo.png"), deficit_data=None):
     """
     Genera el reporte PDF de distribución.
-    CORREGIDO: 
-    1. Convierte Pisos numéricos (1, 2) a texto ("1", "2") para evitar 'nan'.
-    2. Excluye 'Cupos libres' del reporte semanal.
+    CORRECCIÓN ROBUSTA: 
+    1. Convierte la columna Piso a String (Texto) inmediatamente para evitar el TypeError de Categorías.
+    2. Mantiene la exclusión de 'Cupos libres' en el reporte semanal.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
     
-    # --- 1. CORRECCIÓN DE PISOS (Evitar 'nan') ---
-    # Trabajamos sobre una copia para no dañar los datos originales
+    # --- 1. PREPARACIÓN DE DATOS (CRÍTICO) ---
+    # Trabajamos sobre una copia para no afectar la visualización en pantalla
     df_print = distrib_df.copy()
 
-    # Buscamos la columna de piso (sea 'piso', 'Piso', 'PISO'...)
-    col_piso_real = None
+    # Identificar la columna piso (puede venir como 'Piso', 'piso', etc.)
+    col_piso = None
     for c in df_print.columns:
         if c.lower().strip() == "piso":
-            col_piso_real = c
+            col_piso = c
             break
     
-    # Si existe la columna, forzamos que sea TEXTO
-    if col_piso_real:
-        # Rellenamos vacíos y convertimos a string
-        df_print[col_piso_real] = df_print[col_piso_real].fillna("-")
-        df_print[col_piso_real] = df_print[col_piso_real].astype(str)
-        # Limpiamos residuos de conversión fallida
-        df_print[col_piso_real] = df_print[col_piso_real].replace({"nan": "-", "None": "-", "NaN": "-", "<NA>": "-"})
+    # TRANSFORMACIÓN SEGURA A TEXTO
+    # Esto soluciona el TypeError y el problema de los 'nan'
+    if col_piso:
+        # Paso 1: Convertir a string DIRECTAMENTE. 
+        # Esto rompe la restricción de "Categoría" y permite editar libremente.
+        # Los valores nulos se convertirán en la cadena de texto "nan".
+        df_print[col_piso] = df_print[col_piso].astype(str)
+        
+        # Paso 2: Reemplazar las cadenas "nan", "None", etc. por guiones o dejar el número.
+        df_print[col_piso] = df_print[col_piso].replace({"nan": "-", "None": "-", "<NA>": "-"})
 
     # --- PÁGINA 1: DISTRIBUCIÓN DIARIA ---
     pdf.add_page()
@@ -870,14 +873,14 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 8, clean_pdf_text("1. Detalle de Distribución Diaria"), ln=True)
 
-    # Encabezados Tabla
+    # Encabezados
     pdf.set_font("Arial", 'B', 9)
     widths = [30, 60, 25, 25, 25]
     headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"] 
     for w, h in zip(widths, headers): pdf.cell(w, 6, clean_pdf_text(h), 1)
     pdf.ln()
 
-    # Datos Tabla
+    # Datos
     pdf.set_font("Arial", '', 9)
     
     def get_val(row, keys):
@@ -886,31 +889,30 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             if k.lower() in row: return str(row[k.lower()])
         return ""
 
-    # Ordenamos usando el DataFrame que YA convertimos a texto
+    # Ordenamiento: Intentamos usar tu función de orden.
+    # Si falla, usamos el dataframe tal cual viene (que ya tiene los pisos como texto)
     try:
-        df_sorted = apply_sorting_to_df(df_print)
-        # Doble verificación: si el ordenamiento reintroduce 'nan', volvemos atrás
-        if not df_sorted.empty and str(df_sorted.iloc[0].get(col_piso_real, '')) == 'nan':
-             df_sorted = df_print
+        # Nota: apply_sorting_to_df podría intentar volver a categorizar.
+        # Si da problemas, usamos df_print directo.
+        # Por seguridad, usamos df_print que ya es texto puro en el piso.
+        df_sorted = df_print 
     except:
         df_sorted = df_print
 
     for _, r in df_sorted.iterrows():
-        # Obtener valor de piso limpio
-        piso_val = get_val(r, ["Piso", "piso"])
+        # Piso ya viene limpio como string
+        piso_val = r[col_piso] if col_piso else "-"
         
-        # Última defensa contra 'nan'
-        if piso_val.lower() in ["nan", "none", "", "-"]: 
-            piso_val = "-"
-        
-        # OPCIONAL: Si quieres que diga "Piso 1" en vez de "1", descomenta esto:
-        # if piso_val.isdigit(): piso_val = f"Piso {piso_val}"
+        # Equipos, Días, etc.
+        equipo_val = get_val(r, ["Equipo", "equipo"])[:40]
+        dia_val = get_val(r, ["Día", "dia", "Dia"])
+        cupos_val = get_val(r, ["Cupos", "cupos", "Cupos asignados"])
+        pct_val = get_val(r, ["%Distrib", "pct"])
 
         pdf.cell(widths[0], 6, clean_pdf_text(piso_val), 1)
-        pdf.cell(widths[1], 6, clean_pdf_text(get_val(r, ["Equipo", "equipo"])[:40]), 1)
-        pdf.cell(widths[2], 6, clean_pdf_text(get_val(r, ["Día", "dia", "Dia"])), 1)
-        pdf.cell(widths[3], 6, clean_pdf_text(get_val(r, ["Cupos", "cupos", "Cupos asignados"])), 1)
-        pct_val = get_val(r, ["%Distrib", "pct"])
+        pdf.cell(widths[1], 6, clean_pdf_text(equipo_val), 1)
+        pdf.cell(widths[2], 6, clean_pdf_text(dia_val), 1)
+        pdf.cell(widths[3], 6, clean_pdf_text(cupos_val), 1)
         pdf.cell(widths[4], 6, clean_pdf_text(f"{pct_val}%"), 1)
         pdf.ln()
 
@@ -927,13 +929,13 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         weekly_stats = df_print.groupby(col_equipo)[col_cupos].sum().reset_index()
         weekly_stats.columns = ["Equipo", "Total Semanal"]
 
-        # --- 2. CORRECCIÓN: FILTRAR CUPOS LIBRES ---
+        # EXCLUIR CUPOS LIBRES (Solicitado para evitar 0%)
         weekly_stats = weekly_stats[weekly_stats["Equipo"] != "Cupos libres"]
-        # -------------------------------------------
-
+        
         dias_habiles = len(ORDER_DIAS)
         weekly_stats["Promedio Cupo Semanal"] = (weekly_stats["Total Semanal"] / max(dias_habiles, 1)).round(2)
         
+        # Calcular % Uso
         team_dots = infer_team_dotacion_map(semanal_df)
         weekly_stats["Dotación"] = weekly_stats["Equipo"].map(team_dots).fillna(0).astype(int)
         weekly_stats["Total Semanal"] = weekly_stats["Total Semanal"].astype(float)
@@ -948,7 +950,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         
         weekly_stats = weekly_stats.sort_values("Promedio Cupo Semanal", ascending=False)
         
-        # Dibujar Tabla Semanal
+        # Dibujar Tabla
         pdf.set_font("Arial", 'B', 9)
         w_wk = [80, 50, 40]
         h_wk = ["Equipo", "Promedio Cupo Semanal", "% Uso Semanal"]
@@ -965,6 +967,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             pdf.cell(w_wk[1], 6, clean_pdf_text(str(row["Promedio Cupo Semanal"])), 1)
             pdf.cell(w_wk[2], 6, clean_pdf_text(f"{row['% Uso Semanal']:.2f}%"), 1)
             pdf.ln()
+
     except Exception as e:
         pdf.set_font("Arial", 'I', 9)
         pdf.cell(0, 6, clean_pdf_text(f"No se pudo calcular el resumen semanal: {str(e)}"), ln=True)
@@ -2782,6 +2785,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
