@@ -227,26 +227,47 @@ def apply_sorting_to_df(df):
         
     return df
 
-# --- FUNCIONES DE DISTRIBUCIÓN ACTUALIZADAS ---
+# ---------------------------------------------------------
+# FUNCIONES DE DISTRIBUCIÓN CORREGIDAS
+# ---------------------------------------------------------
+
+# 1. Agregamos el argumento df_capacidades
 def get_distribution_proposal(df_equipos, df_parametros, df_capacidades, strategy="random", ignore_params=False):
-    """Genera una propuesta basada en estrategia."""
+    """
+    Genera una propuesta basada en una estrategia de ordenamiento.
+    """
     eq_proc = df_equipos.copy()
     pa_proc = df_parametros.copy()
     
-    if strategy == "random": 
-        eq_proc = eq_proc.sample(frac=1).reset_index(drop=True)
+    # Asegurarnos de que tenemos datos numéricos para ordenar
+    col_sort = None
+    for c in eq_proc.columns:
+        if c.lower().strip() == "dotacion":
+            col_sort = c
+            break
     
-    # LLAMADA A SEATS CON LA NUEVA HOJA CAPACIDADES
+    if not col_sort and strategy != "random": strategy = "random"
+
+    # APLICAR ESTRATEGIA
+    if strategy == "random":
+        eq_proc = eq_proc.sample(frac=1).reset_index(drop=True)
+    elif strategy == "size_desc" and col_sort:
+        eq_proc = eq_proc.sort_values(by=col_sort, ascending=False).reset_index(drop=True)
+    elif strategy == "size_asc" and col_sort:
+        eq_proc = eq_proc.sort_values(by=col_sort, ascending=True).reset_index(drop=True)
+
+    # CORRECCIÓN CRÍTICA AQUÍ: Pasamos df_capacidades al motor
     rows, deficit_report = compute_distribution_from_excel(
         eq_proc, pa_proc, df_capacidades, 2, ignore_params=ignore_params
     )
+    
     return rows, filter_minimum_deficits(deficit_report)
 
+# 2. Actualizamos también la función de ideales
 def generate_ideal_distributions(df_equipos, df_parametros, df_capacidades, num_options=3):
-    """Genera opciones ideales."""
     distributions = []
     for i in range(num_options):
-        # Pasamos df_capacidades en cada iteración
+        # Pasamos df_capacidades aquí también
         rows, deficit = get_distribution_proposal(df_equipos, df_parametros, df_capacidades, strategy="random", ignore_params=True)
         distributions.append({
             'rows': rows,
@@ -2644,6 +2665,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
