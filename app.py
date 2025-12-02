@@ -829,19 +829,32 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
 
 def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=Path("static/logo.png"), deficit_data=None):
     """
-    Genera el reporte PDF de distribución con tablas diaria y semanal.
-    CORREGIDO: Filtra Cupos libres en resumen semanal y arregla pisos 'nan'.
+    Genera el reporte PDF de distribución.
+    CORREGIDO: 
+    1. Convierte Pisos numéricos (1, 2) a texto ("1", "2") para evitar 'nan'.
+    2. Excluye 'Cupos libres' del reporte semanal.
     """
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
     
-    # --- PRE-PROCESAMIENTO PARA EVITAR 'nan' ---
-    # Convertimos a string y rellenamos nulos antes de cualquier cosa
-    if not distrib_df.empty:
-        # Asegurar que el piso sea string para evitar problemas con Categorical
-        for col in ["Piso", "piso"]:
-            if col in distrib_df.columns:
-                distrib_df[col] = distrib_df[col].astype(str).replace("nan", "").replace("None", "")
+    # --- 1. CORRECCIÓN DE PISOS (Evitar 'nan') ---
+    # Trabajamos sobre una copia para no dañar los datos originales
+    df_print = distrib_df.copy()
+
+    # Buscamos la columna de piso (sea 'piso', 'Piso', 'PISO'...)
+    col_piso_real = None
+    for c in df_print.columns:
+        if c.lower().strip() == "piso":
+            col_piso_real = c
+            break
+    
+    # Si existe la columna, forzamos que sea TEXTO
+    if col_piso_real:
+        # Rellenamos vacíos y convertimos a string
+        df_print[col_piso_real] = df_print[col_piso_real].fillna("-")
+        df_print[col_piso_real] = df_print[col_piso_real].astype(str)
+        # Limpiamos residuos de conversión fallida
+        df_print[col_piso_real] = df_print[col_piso_real].replace({"nan": "-", "None": "-", "NaN": "-", "<NA>": "-"})
 
     # --- PÁGINA 1: DISTRIBUCIÓN DIARIA ---
     pdf.add_page()
@@ -853,34 +866,45 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.cell(0, 10, clean_pdf_text("Informe de Distribución"), ln=True, align='C')
     pdf.ln(6)
 
-    # Título de sección
+    # Título
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 8, clean_pdf_text("1. Detalle de Distribución Diaria"), ln=True)
 
-    # Tabla Diaria
+    # Encabezados Tabla
     pdf.set_font("Arial", 'B', 9)
     widths = [30, 60, 25, 25, 25]
     headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"] 
     for w, h in zip(widths, headers): pdf.cell(w, 6, clean_pdf_text(h), 1)
     pdf.ln()
 
+    # Datos Tabla
     pdf.set_font("Arial", '', 9)
+    
     def get_val(row, keys):
         for k in keys:
             if k in row: return str(row[k])
             if k.lower() in row: return str(row[k.lower()])
         return ""
 
-    # Intentamos ordenar, pero si falla, usamos el DF original para no perder datos
+    # Ordenamos usando el DataFrame que YA convertimos a texto
     try:
-        distrib_df_sorted = apply_sorting_to_df(distrib_df)
+        df_sorted = apply_sorting_to_df(df_print)
+        # Doble verificación: si el ordenamiento reintroduce 'nan', volvemos atrás
+        if not df_sorted.empty and str(df_sorted.iloc[0].get(col_piso_real, '')) == 'nan':
+             df_sorted = df_print
     except:
-        distrib_df_sorted = distrib_df
+        df_sorted = df_print
 
-    for _, r in distrib_df_sorted.iterrows():
-        # Limpieza extra para el piso
+    for _, r in df_sorted.iterrows():
+        # Obtener valor de piso limpio
         piso_val = get_val(r, ["Piso", "piso"])
-        if piso_val.lower() == "nan": piso_val = "-"
+        
+        # Última defensa contra 'nan'
+        if piso_val.lower() in ["nan", "none", "", "-"]: 
+            piso_val = "-"
+        
+        # OPCIONAL: Si quieres que diga "Piso 1" en vez de "1", descomenta esto:
+        # if piso_val.isdigit(): piso_val = f"Piso {piso_val}"
 
         pdf.cell(widths[0], 6, clean_pdf_text(piso_val), 1)
         pdf.cell(widths[1], 6, clean_pdf_text(get_val(r, ["Equipo", "equipo"])[:40]), 1)
@@ -890,31 +914,26 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         pdf.cell(widths[4], 6, clean_pdf_text(f"{pct_val}%"), 1)
         pdf.ln()
 
-    # --- SECCIÓN NUEVA: TABLA SEMANAL ---
-    pdf.add_page() # Nueva página para el resumen semanal
+    # --- PÁGINA 2: TABLA SEMANAL ---
+    pdf.add_page() 
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(0, 10, clean_pdf_text("2. Resumen de Uso Semanal por Equipo"), ln=True)
     
-    # Cálculo del resumen semanal
     try:
-        # Calcular total semanal por equipo
-        col_cupos = "Cupos" if "Cupos" in distrib_df.columns else "cupos"
-        col_equipo = "Equipo" if "Equipo" in distrib_df.columns else "equipo"
+        col_cupos = "Cupos" if "Cupos" in df_print.columns else "cupos"
+        col_equipo = "Equipo" if "Equipo" in df_print.columns else "equipo"
         
-        # Agrupar por equipo y sumar cupos semanales
-        weekly_stats = distrib_df.groupby(col_equipo)[col_cupos].sum().reset_index()
+        # Agrupar
+        weekly_stats = df_print.groupby(col_equipo)[col_cupos].sum().reset_index()
         weekly_stats.columns = ["Equipo", "Total Semanal"]
 
-        # --- CORRECCIÓN 1: FILTRAR CUPOS LIBRES ---
-        # Quitamos "Cupos libres" del reporte semanal para que no salga con 0%
+        # --- 2. CORRECCIÓN: FILTRAR CUPOS LIBRES ---
         weekly_stats = weekly_stats[weekly_stats["Equipo"] != "Cupos libres"]
-        # ------------------------------------------
-        
-        # Calcular promedio semanal por equipo (sobre 5 días hábiles)
+        # -------------------------------------------
+
         dias_habiles = len(ORDER_DIAS)
         weekly_stats["Promedio Cupo Semanal"] = (weekly_stats["Total Semanal"] / max(dias_habiles, 1)).round(2)
         
-        # Calcular % de uso semanal respecto de la dotación total
         team_dots = infer_team_dotacion_map(semanal_df)
         weekly_stats["Dotación"] = weekly_stats["Equipo"].map(team_dots).fillna(0).astype(int)
         weekly_stats["Total Semanal"] = weekly_stats["Total Semanal"].astype(float)
@@ -927,7 +946,6 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             axis=1
         ).round(2)
         
-        # Ordenar por promedio descendente
         weekly_stats = weekly_stats.sort_values("Promedio Cupo Semanal", ascending=False)
         
         # Dibujar Tabla Semanal
@@ -935,7 +953,6 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         w_wk = [80, 50, 40]
         h_wk = ["Equipo", "Promedio Cupo Semanal", "% Uso Semanal"]
         
-        # Centrar un poco la tabla
         start_x = 25
         pdf.set_x(start_x)
         for w, h in zip(w_wk, h_wk): pdf.cell(w, 6, clean_pdf_text(h), 1)
@@ -952,7 +969,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
         pdf.set_font("Arial", 'I', 9)
         pdf.cell(0, 6, clean_pdf_text(f"No se pudo calcular el resumen semanal: {str(e)}"), ln=True)
 
-    # --- GLOSARIO DE CÁLCULOS ---
+    # --- GLOSARIO ---
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 10)
     pdf.cell(0, 8, clean_pdf_text("Glosario de Métricas y Cálculos:"), ln=True)
@@ -974,7 +991,7 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
     pdf.set_font("Arial", 'I', 8)
     pdf.cell(0, 6, clean_pdf_text(f"Informe generado el {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} hrs"), ln=True, align='R')
 
-    # --- PÁGINA 3: DÉFICIT (Si existe) ---
+    # --- PÁGINA 3: DÉFICIT ---
     if deficit_data and len(deficit_data) > 0:
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
@@ -1017,7 +1034,6 @@ def generate_full_pdf(distrib_df, semanal_df, out_path="reporte.pdf", logo_path=
             x_start = pdf.get_x()
 
             pdf.cell(dw[0], row_height, piso, 1, 0, 'C')
-            
             x_curr = pdf.get_x()
             pdf.multi_cell(dw[1], line_height, equipo, 1, 'L')
             pdf.set_xy(x_curr + dw[1], y_start)
@@ -2766,6 +2782,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
