@@ -14,6 +14,10 @@ from PIL import Image
 from io import BytesIO
 from dataclasses import dataclass
 import base64
+from typing import Optional
+import numpy as np
+import random
+
 
 # ---------------------------------------------------------
 # 1. PARCHE PARA STREAMLIT >= 1.39 (MANTIENE LA COMPATIBILIDAD CON ST_CANVAS)
@@ -231,6 +235,123 @@ def apply_sorting_to_df(df):
 # ---------------------------------------------------------
 # FUNCIONES DE DISTRIBUCIÓN CORREGIDAS
 # ---------------------------------------------------------
+def _get_team_and_dotacion_cols(df_eq: pd.DataFrame):
+    if df_eq is None or df_eq.empty:
+        return None, None
+
+    cols = list(df_eq.columns)
+    col_team = next((c for c in cols if "equipo" in c.lower()), None)
+    col_dot = next((c for c in cols if "personas" in c.lower()), None)
+    if not col_dot:
+        col_dot = next((c for c in cols if "dot" in c.lower()), None)
+    return col_team, col_dot
+
+
+def _build_dotacion_map(df_eq: pd.DataFrame) -> dict:
+    col_team, col_dot = _get_team_and_dotacion_cols(df_eq)
+    if not col_team or not col_dot:
+        return {}
+
+    dot = {}
+    for _, r in df_eq.iterrows():
+        team = str(r.get(col_team, "")).strip()
+        if not team or team.lower() == "cupos libres":
+            continue
+        try:
+            val = float(str(r.get(col_dot, "0")).replace(",", "."))
+        except Exception:
+            continue
+        if val > 0:
+            dot[team] = val
+    return dot
+
+
+def _equity_score(rows, deficit, dot_map: dict, days_per_week=5):
+    """
+    Score de equidad:
+    - Convierte asignación semanal por equipo a "fracción de cobertura"
+      coverage = cupos_asignados / (personas * 5)
+    - Queremos que todas las coverages sean lo más parecidas posible.
+    """
+    assigned = {}
+    for r in rows or []:
+        eq = str(r.get("equipo", "")).strip()
+        if not eq or eq.lower() == "cupos libres":
+            continue
+        try:
+            cup = int(float(str(r.get("cupos", 0)).replace(",", ".")))
+        except Exception:
+            cup = 0
+        assigned[eq] = assigned.get(eq, 0) + cup
+
+    coverages = []
+    for eq, people in dot_map.items():
+        needed = float(people) * float(days_per_week)
+        if needed <= 0:
+            continue
+        coverages.append(assigned.get(eq, 0) / needed)
+
+    # Si no hay datos para comparar, castiga fuerte
+    if not coverages:
+        return 9999.0 + (len(deficit) if deficit else 0)
+
+    coverages = np.array(coverages, dtype=float)
+    std = float(np.std(coverages))                 # dispersión
+    rng = float(np.max(coverages) - np.min(coverages))  # diferencia max-min
+    conflicts = float(len(deficit) if deficit else 0)   # penalización por conflictos
+
+    # Pesos: std manda, luego rango, luego conflictos
+    return (1.0 * std) + (0.6 * rng) + (0.2 * conflicts)
+
+
+def generate_balanced_distribution(
+    df_eq: pd.DataFrame,
+    df_pa: pd.DataFrame,
+    df_cap: pd.DataFrame,
+    ignore_params: bool,
+    num_attempts: int = 80,
+    seed: Optional[int] = None
+):
+    """
+    Genera varias distribuciones aleatorias y elige la más EQUITATIVA.
+
+    Python 3.9+ friendly: seed: Optional[int] = None
+    """
+    if seed is None:
+        seed = random.randint(1, 10_000_000)
+
+    dot_map = _build_dotacion_map(df_eq)
+
+    best_score = float("inf")
+    best_rows = None
+    best_def = None
+    best_meta = None
+
+    for i in range(num_attempts):
+        attempt_seed = int(seed) + i * 9973
+
+        # Shuffle reproducible
+        eq_shuffled = df_eq.sample(frac=1, random_state=attempt_seed).reset_index(drop=True)
+
+        rows, deficit = get_distribution_proposal(
+            eq_shuffled, df_pa, df_cap,
+            strategy="random",
+            ignore_params=ignore_params
+        )
+
+        def_clean = filter_minimum_deficits(deficit)
+        if ignore_params:
+            def_clean = []
+
+        score = _equity_score(rows, def_clean, dot_map)
+
+        if score < best_score:
+            best_score = score
+            best_rows = rows
+            best_def = def_clean
+            best_meta = {"score": best_score, "seed": attempt_seed, "attempts": num_attempts}
+
+    return best_rows, best_def, best_meta
 
 def get_distribution_proposal(df_equipos, df_parametros, df_capacidades, strategy="random", ignore_params=False):
     """
@@ -1684,7 +1805,7 @@ elif menu == "Administrador":
                     st.session_state['ignore_params'] = ignore_params
                     st.session_state['ideal_options'] = None
                     
-                    # 3. Calcular
+                    # 4 . Calcular
                     if ignore_params:
                         # Generamos opciones ideales
                         dists = generate_ideal_distributions(df_eq, df_pa, df_cap, num_options=3)
@@ -1731,7 +1852,7 @@ elif menu == "Administrador":
 
             # --- PANEL DE ACCIONES ---
             st.markdown("### Panel de Control")
-            c_regen, c_opt, c_save = st.columns([1, 1, 1])
+            c_regen, c_opt, c_save = st.columns([1, 1])
             
             # Recuperar datos de sesión
             df_eq_s = st.session_state.get('excel_equipos', pd.DataFrame())
@@ -1740,119 +1861,22 @@ elif menu == "Administrador":
             ign_s = st.session_state.get('ignore_params', False)
 
             # 1. BOTÓN REGENERAR (Key única v3)
-            if c_regen.button("🔄 Regenerar Distribución", key="btn_regen_v3"):
-                with st.spinner("Recalculando..."):
-                    rows, deficit = get_distribution_proposal(
+            if c_regen.button("🔄 Regenerar distribución (Equilibrada)", key="btn_regen_balanced"):
+                with st.spinner("Buscando la distribución más equilibrada..."):
+                    rows, deficit, meta = generate_balanced_distribution(
                         df_eq_s, df_pa_s, df_cap_s,
-                        strategy="random",
-                        ignore_params=ign_s
-                    )
-                    st.session_state['proposal_rows'] = rows
-                    st.session_state['proposal_deficit'] = filter_minimum_deficits(deficit)
-                    st.session_state['ideal_options'] = None 
+                            ignore_params=ign_s,
+                            num_attempts=80,   # puedes subir a 150 si quieres más “calidad”
+                            seed=None
+                        )
+                        st.session_state['proposal_rows'] = rows
+                        st.session_state['proposal_deficit'] = deficit
+                        st.session_state['ideal_options'] = None
+                        st.session_state['last_balance_meta'] = meta
+                    st.toast(f"Equilibrado listo ✅ (score: {st.session_state['last_balance_meta']['score']:.4f})", icon="⚖️")
                 st.rerun()
 
-            # 2. BOTÓN AUTO-OPTIMIZAR (LÓGICA DE JUSTICIA / EQUIDAD)
-            if c_opt.button("✨ Auto-Optimizar (Equidad)", key="btn_opt_v3"):
-                import numpy as np 
-
-                NUM_INTENTOS = 50 
-                progress_text = "Buscando la distribución más justa (basado en columna 'Personas')..."
-                my_bar = st.progress(0, text=progress_text)
-                
-                best_rows = None
-                best_deficit = None
-                min_unfairness_score = float('inf') 
-
-                # 1. Preparamos el mapa de Dotación Total usando la columna "Personas"
-                df_eq_ref = st.session_state.get('excel_equipos', pd.DataFrame())
-                dotacion_map = {}
-                
-                # --- CORRECCIÓN AQUÍ: Buscamos "Personas" ---
-                col_dot = next((c for c in df_eq_ref.columns if "personas" in c.lower()), None)
-                # Si no encuentra "Personas", intenta "Dotacion" por si acaso
-                if not col_dot:
-                    col_dot = next((c for c in df_eq_ref.columns if "dot" in c.lower()), None)
-                
-                col_eq_name = next((c for c in df_eq_ref.columns if "equipo" in c.lower()), None)
-
-                # Validamos que encontramos las columnas
-                if col_dot and col_eq_name:
-                    for _, row in df_eq_ref.iterrows():
-                        try:
-                            # Guardamos: { 'Nombre Equipo': Cantidad_Personas }
-                            team_name = str(row[col_eq_name]).strip()
-                            # Forzamos conversión a float/int por si viene como texto
-                            val_personas = float(str(row[col_dot]).replace(',', '.'))
-                            dotacion_map[team_name] = val_personas
-                        except: 
-                            pass
-                else:
-                    st.warning("⚠️ No encontré la columna 'Personas' en la hoja Equipos. La optimización será menos precisa.")
-                
-                # BUCLE DE OPTIMIZACIÓN
-                for i in range(NUM_INTENTOS):
-                    # Generamos una propuesta aleatoria
-                    r, d = get_distribution_proposal(
-                        df_eq_s, df_pa_s, df_cap_s,
-                        strategy="random",
-                        ignore_params=ign_s
-                    )
-                    
-                    # --- CÁLCULO DE JUSTICIA (SCORE) ---
-                    assigned_map = {}
-                    for row in r:
-                        eq = row.get('equipo', 'Unknown')
-                        cupos = int(row.get('cupos', 0))
-                        assigned_map[eq] = assigned_map.get(eq, 0) + cupos
-                    
-                    # Calcular % de satisfacción por equipo
-                    satisfaction_percentages = []
-                    
-                    for eq, total_personas in dotacion_map.items():
-                        if total_personas > 0:
-                            assigned = assigned_map.get(eq, 0)
-                            # Necesidad semanal ideal = Personas * 5 días
-                            needed = total_personas * 5 
-                            pct = (assigned / needed) * 100
-                            satisfaction_percentages.append(pct)
-                    
-                    # Métrica: Desviación Estándar (mientras más baja, más parejo el reparto)
-                    if satisfaction_percentages:
-                        current_unfairness = np.std(satisfaction_percentages)
-                    else:
-                        current_unfairness = len(d) if d else 0
-                    
-                    # Penalizar si hay conflictos críticos
-                    penalty_conflicts = len(d) if d else 0
-                    
-                    final_score = current_unfairness + (penalty_conflicts * 0.1)
-
-                    # Guardar el mejor
-                    if final_score < min_unfairness_score:
-                        min_unfairness_score = final_score
-                        best_rows = r
-                        best_deficit = d
-                    
-                    my_bar.progress(int((i + 1) / NUM_INTENTOS * 100))
-                
-                # FINALIZAR
-                st.session_state['proposal_rows'] = best_rows
-                
-                # Limpieza de reporte si se pidió ignorar reglas
-                final_def_clean = filter_minimum_deficits(best_deficit)
-                if ign_s: final_def_clean = [] 
-                
-                st.session_state['proposal_deficit'] = final_def_clean
-                st.session_state['ideal_options'] = None
-                
-                my_bar.empty()
-                st.toast(f"¡Optimizado! Desviación: {min_unfairness_score:.2f}", icon="⚖️")
-                st.rerun()
-                st.toast("¡Optimizado!", icon="⚖️")
-                st.rerun()
-
-            # 3. BOTÓN GUARDAR (Key única v3)
+            # 2. BOTÓN GUARDAR (Key única v3)
             if c_save.button("💾 Guardar", type="primary", key="btn_save_v3"):
                 try:
                     clear_distribution(conn)
@@ -1865,6 +1889,12 @@ elif menu == "Administrador":
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
 
+meta = st.session_state.get("last_balance_meta")
+if meta:
+    st.caption(
+        f"⚖️ Equidad score: {meta['score']:.4f} | intentos: {meta['attempts']} | seed: {meta['seed']}"
+    )
+            
             # --- TABLAS ---
             t_view, t_def = st.tabs(["📊 Tabla de Distribución", "🚨 Reporte de Conflictos"])
             
@@ -2754,6 +2784,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
