@@ -1671,7 +1671,7 @@ elif menu == "Administrador":
         )
 
         # Botón Inicial
-        if st.button("🚀 Procesar e Iniciar", type="primary", key="btn_process_init"):
+        if st.button("Procesar e Iniciar", type="primary", key="btn_process_init"):
             st.cache_data.clear()
             
             if up:
@@ -1764,50 +1764,103 @@ elif menu == "Administrador":
                     st.session_state['ideal_options'] = None 
                 st.rerun()
 
-            # 2. BOTÓN AUTO-OPTIMIZAR (Key única v3)
-            if c_opt.button("✨ Auto-Optimizar", key="btn_opt_v3"):
-                NUM_INTENTOS = 20 
-                progress_text = "Optimizando justicia..."
+            # 2. BOTÓN AUTO-OPTIMIZAR (LÓGICA DE JUSTICIA / EQUIDAD)
+            if c_opt.button("✨ Auto-Optimizar (Equidad)", key="btn_opt_v3"):
+                import numpy as np 
+
+                NUM_INTENTOS = 50 
+                progress_text = "Buscando la distribución más justa (basado en columna 'Personas')..."
                 my_bar = st.progress(0, text=progress_text)
                 
                 best_rows = None
                 best_deficit = None
-                min_unfairness = 999999 
-                min_conflicts = 999999
+                min_unfairness_score = float('inf') 
+
+                # 1. Preparamos el mapa de Dotación Total usando la columna "Personas"
+                df_eq_ref = st.session_state.get('excel_equipos', pd.DataFrame())
+                dotacion_map = {}
                 
+                # --- CORRECCIÓN AQUÍ: Buscamos "Personas" ---
+                col_dot = next((c for c in df_eq_ref.columns if "personas" in c.lower()), None)
+                # Si no encuentra "Personas", intenta "Dotacion" por si acaso
+                if not col_dot:
+                    col_dot = next((c for c in df_eq_ref.columns if "dot" in c.lower()), None)
+                
+                col_eq_name = next((c for c in df_eq_ref.columns if "equipo" in c.lower()), None)
+
+                # Validamos que encontramos las columnas
+                if col_dot and col_eq_name:
+                    for _, row in df_eq_ref.iterrows():
+                        try:
+                            # Guardamos: { 'Nombre Equipo': Cantidad_Personas }
+                            team_name = str(row[col_eq_name]).strip()
+                            # Forzamos conversión a float/int por si viene como texto
+                            val_personas = float(str(row[col_dot]).replace(',', '.'))
+                            dotacion_map[team_name] = val_personas
+                        except: 
+                            pass
+                else:
+                    st.warning("⚠️ No encontré la columna 'Personas' en la hoja Equipos. La optimización será menos precisa.")
+                
+                # BUCLE DE OPTIMIZACIÓN
                 for i in range(NUM_INTENTOS):
+                    # Generamos una propuesta aleatoria
                     r, d = get_distribution_proposal(
                         df_eq_s, df_pa_s, df_cap_s,
                         strategy="random",
                         ignore_params=ign_s
                     )
                     
-                    n_conf = len(d) if d else 0
-                    if d:
-                        eqs = [x['equipo'] for x in d]
-                        freqs = {x:eqs.count(x) for x in set(eqs)}
-                        score = sum([v**2 for v in freqs.values()])
-                    else:
-                        score = 0
+                    # --- CÁLCULO DE JUSTICIA (SCORE) ---
+                    assigned_map = {}
+                    for row in r:
+                        eq = row.get('equipo', 'Unknown')
+                        cupos = int(row.get('cupos', 0))
+                        assigned_map[eq] = assigned_map.get(eq, 0) + cupos
                     
-                    if score < min_unfairness:
-                        min_unfairness = score
-                        min_conflicts = n_conf
-                        best_rows = r
-                        best_deficit = d
-                    elif score == min_unfairness and n_conf < min_conflicts:
-                        min_conflicts = n_conf
+                    # Calcular % de satisfacción por equipo
+                    satisfaction_percentages = []
+                    
+                    for eq, total_personas in dotacion_map.items():
+                        if total_personas > 0:
+                            assigned = assigned_map.get(eq, 0)
+                            # Necesidad semanal ideal = Personas * 5 días
+                            needed = total_personas * 5 
+                            pct = (assigned / needed) * 100
+                            satisfaction_percentages.append(pct)
+                    
+                    # Métrica: Desviación Estándar (mientras más baja, más parejo el reparto)
+                    if satisfaction_percentages:
+                        current_unfairness = np.std(satisfaction_percentages)
+                    else:
+                        current_unfairness = len(d) if d else 0
+                    
+                    # Penalizar si hay conflictos críticos
+                    penalty_conflicts = len(d) if d else 0
+                    
+                    final_score = current_unfairness + (penalty_conflicts * 0.1)
+
+                    # Guardar el mejor
+                    if final_score < min_unfairness_score:
+                        min_unfairness_score = final_score
                         best_rows = r
                         best_deficit = d
                     
                     my_bar.progress(int((i + 1) / NUM_INTENTOS * 100))
                 
+                # FINALIZAR
                 st.session_state['proposal_rows'] = best_rows
-                st.session_state['proposal_deficit'] = filter_minimum_deficits(best_deficit)
+                
+                # Limpieza de reporte si se pidió ignorar reglas
+                final_def_clean = filter_minimum_deficits(best_deficit)
+                if ign_s: final_def_clean = [] 
+                
+                st.session_state['proposal_deficit'] = final_def_clean
                 st.session_state['ideal_options'] = None
-                st.session_state['last_optimization_stats'] = {'iterations': NUM_INTENTOS, 'score': min_unfairness}
                 
                 my_bar.empty()
+                st.toast(f"¡Optimizado! Desviación: {min_unfairness_score:.2f}", icon="⚖️")
+                st.rerun()
                 st.toast("¡Optimizado!", icon="⚖️")
                 st.rerun()
 
@@ -2713,6 +2766,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
