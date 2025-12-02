@@ -1832,9 +1832,18 @@ elif menu == "Administrador":
         col_left, col_right = st.columns([2, 1])
         
         with col_left:
-            p_sel = st.selectbox("Piso", pisos_list, key="editor_piso")
-            p_num = p_sel.replace("Piso ", "").strip()
+            # Limpiar lista de nulos
+            pisos_list_clean = [p for p in pisos_list if p is not None]
+            if not pisos_list_clean: pisos_list_clean = ["Piso 1"]
+
+            p_sel = st.selectbox("Piso", pisos_list_clean, key="editor_piso")
             
+            # Blindaje: Validar que p_sel no sea None
+            if p_sel:
+                p_num = str(p_sel).replace("Piso ", "").strip()
+            else:
+                p_num = "1"
+
             # Búsqueda de Archivo
             file_base = f"piso{p_num}"
             pim = PLANOS_DIR / f"{file_base}.png"
@@ -2674,5 +2683,6 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
