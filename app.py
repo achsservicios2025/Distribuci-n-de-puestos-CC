@@ -1935,26 +1935,33 @@ elif menu == "Administrador":
             st.subheader("🎨 Configuración de Zonas")
             
             # Preparar lista de equipos
-            d_sel = st.selectbox("Día Ref.", ORDER_DIAS, key=f"dia_ref_{p_sel}")
+            # Blindaje: Si p_sel es None, usamos un valor dummy para no romper el código
+            piso_str = str(p_sel) if p_sel else "1"
+            
+            d_sel = st.selectbox("Día Ref.", ORDER_DIAS, key=f"dia_ref_{piso_str}")
             current_seats_dict = {}
             eqs = [""]
-            if not df_d.empty:
+            
+            if not df_d.empty and p_sel:
                 subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
                 current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
                 eqs += sorted(subset['equipo'].unique().tolist())
             
+            # --- CORRECCIÓN DEL ERROR ---
+            # Usamos piso_str que ya está convertido a string seguro
             salas_piso = []
-            if "1" in p_sel:
+            if "1" in piso_str:
                 salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
-            elif "2" in p_sel:
+            elif "2" in piso_str:
                 salas_piso = ["Sala Reuniones - Piso 2"]
-            elif "3" in p_sel:
+            elif "3" in piso_str:
                 salas_piso = ["Sala Reuniones - Piso 3"]
             eqs += salas_piso
+            # -----------------------------
 
             # Selector de equipo y color
-            tn = st.selectbox("Equipo / Sala", eqs, key=f"team_{p_sel}")
-            tc = st.color_picker("Color", "#00A04A", key=f"color_{p_sel}")
+            tn = st.selectbox("Equipo / Sala", eqs, key=f"team_{piso_str}")
+            tc = st.color_picker("Color", "#00A04A", key=f"color_{piso_str}")
 
             if tn and tn in current_seats_dict:
                 st.info(f"📊 Cupos: {current_seats_dict[tn]}")
@@ -2683,6 +2690,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
