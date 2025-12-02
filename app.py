@@ -1282,7 +1282,7 @@ elif menu == "Reservas":
                 disponibles = max(0, total_cupos - ocupados)
                 
                 if disponibles > 0:
-                    st.success(f"✅ **Hay cupo: Quedan {disponibles} puestos disponibles** (Total: {total_cupos}).")
+                    st.success(f"✅ **Hay cupo: Quedan {disponibles} puestos disponibles**")
                 else:
                     st.error(f"🔴 **AGOTADO: Se ocuparon los {total_cupos} puestos del día.**")
                 
@@ -2754,6 +2754,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
