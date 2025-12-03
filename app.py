@@ -2187,7 +2187,6 @@ elif menu == "Administrador":
                     initial_drawing={"version": "4.4.0", "objects": init_objects},
                     key=st_canvas_key,
                 )
-
                     fill_color=fill_rgba,
                     stroke_width=2,
                     stroke_color=selected_color,
@@ -2739,6 +2738,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
