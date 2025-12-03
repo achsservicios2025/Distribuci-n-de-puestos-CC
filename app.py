@@ -1894,9 +1894,23 @@ elif menu == "Administrador":
 
             with t_view:
                 df_preview = pd.DataFrame(st.session_state.get("proposal_rows", []))
+
                 if not df_preview.empty:
                     df_sorted = apply_sorting_to_df(df_preview)
-                    st.dataframe(df_sorted, hide_index=True, use_container_width=True)
+
+                    # ✅ Mostrar SOLO estas columnas (y con estos nombres)
+                    df_show = df_sorted.rename(columns={
+                        "piso": "Piso",
+                        "equipo": "Equipo",
+                        "dia": "Día",
+                        "cupos": "Cupos",
+                        "pct": "% de Uso diario",
+                    })
+
+                    wanted = ["Piso", "Equipo", "Día", "Cupos", "% de Uso diario"]
+                    df_show = df_show[[c for c in wanted if c in df_show.columns]]
+
+                    st.dataframe(df_show, hide_index=True, use_container_width=True)
                 else:
                     st.warning("No hay datos.")
 
@@ -2556,6 +2570,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
