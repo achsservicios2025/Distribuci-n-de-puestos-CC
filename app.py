@@ -280,6 +280,185 @@ def generate_balanced_distribution(
     num_attempts: int = 80,
     seed: Optional[int] = None
 ):
+    def _get_col(df, contains):
+    cols = list(df.columns)
+    for c in cols:
+        if contains in c.lower():
+            return c
+    return None
+
+def _dot_map_from_equipos(df_eq: pd.DataFrame) -> dict:
+    if df_eq is None or df_eq.empty:
+        return {}
+    col_team = next((c for c in df_eq.columns if "equipo" in c.lower()), None)
+    col_dot = None
+    # soporta "personas", "dotacion", "dotación", "dot"
+    for key in ["personas", "dotacion", "dotación", "dot"]:
+        col_dot = next((c for c in df_eq.columns if key in c.lower()), None)
+        if col_dot:
+            break
+    if not col_team or not col_dot:
+        return {}
+
+    out = {}
+    for _, r in df_eq.iterrows():
+        team = str(r.get(col_team, "")).strip()
+        if not team or team.lower() == "cupos libres":
+            continue
+        try:
+            val = int(float(str(r.get(col_dot, 0)).replace(",", ".")))
+        except Exception:
+            continue
+        if val > 0:
+            out[team] = val
+    return out
+
+def _cap_map_from_capacidades(df_cap: pd.DataFrame) -> dict:
+    """
+    Espera una hoja Capacidades con algo como:
+    piso | dia | capacidad
+    Si no hay 'dia', asumimos capacidad diaria igual para todos los días.
+    """
+    if df_cap is None or df_cap.empty:
+        return {}
+
+    # intentar detectar columnas
+    col_piso = next((c for c in df_cap.columns if "piso" in c.lower()), None)
+    col_dia = next((c for c in df_cap.columns if "dia" in c.lower() or "día" in c.lower()), None)
+    col_cap = next((c for c in df_cap.columns if "cap" in c.lower() or "cupo" in c.lower()), None)
+
+    if not col_piso or not col_cap:
+        return {}
+
+    out = {}
+    for _, r in df_cap.iterrows():
+        piso = str(r.get(col_piso, "")).strip()
+        if not piso:
+            continue
+        dia = str(r.get(col_dia, "")).strip() if col_dia else ""
+        try:
+            cap = int(float(str(r.get(col_cap, 0)).replace(",", ".")))
+        except Exception:
+            continue
+        if cap <= 0:
+            continue
+        # clave por (piso,dia) o (piso,"")
+        out[(piso, dia)] = cap
+    return out
+
+def _min_daily_for_team(dotacion: int) -> int:
+    # ✅ Ajusta esta escala a tu criterio (esto es lo importante)
+    if dotacion >= 13: return 6
+    if dotacion >= 8:  return 4
+    if dotacion >= 5:  return 3
+    if dotacion >= 3:  return 2
+    return 0
+
+def _largest_remainder_allocation(weights: dict, total: int) -> dict:
+    """
+    Reparte 'total' proporcional a weights (enteros) con método Hamilton.
+    """
+    if total <= 0 or not weights:
+        return {k: 0 for k in weights.keys()}
+
+    s = sum(max(0, int(v)) for v in weights.values())
+    if s <= 0:
+        return {k: 0 for k in weights.keys()}
+
+    quotas = {k: (max(0, int(w)) / s) * total for k, w in weights.items()}
+    base = {k: int(q) for k, q in quotas.items()}
+    used = sum(base.values())
+    remain = total - used
+
+    # ordenar por mayor fracción
+    frac = sorted(((k, quotas[k] - base[k]) for k in quotas), key=lambda x: x[1], reverse=True)
+    i = 0
+    while remain > 0 and i < len(frac):
+        k = frac[i][0]
+        base[k] += 1
+        remain -= 1
+        i += 1
+        if i >= len(frac) and remain > 0:
+            i = 0
+    return base
+
+def generate_distribution_math_correct(
+    df_eq: pd.DataFrame,
+    df_cap: pd.DataFrame,
+    cupos_libres_diarios: int = 2,
+    min_dotacion_para_garantia: int = 3
+):
+    """
+    Genera distribución diaria por piso/día:
+    - Mantiene cupos libres fijos.
+    - Garantiza mínimos diarios escalados para equipos con dotación >= 3.
+    - Resto se reparte proporcional a dotación.
+    """
+    dot = _dot_map_from_equipos(df_eq)
+    cap_map = _cap_map_from_capacidades(df_cap)
+
+    # pisos: desde capacidades si existe, si no desde dot (un piso default)
+    pisos = sorted({p for (p, _) in cap_map.keys()} or {"Piso 1"})
+
+    rows = []
+    deficits = []
+
+    for piso in pisos:
+        for dia in ORDER_DIAS:
+            # capacidad para (piso,dia) o fallback (piso,"")
+            cap = cap_map.get((piso, dia)) or cap_map.get((piso, "")) or 0
+            if cap <= 0:
+                # si no hay capacidades, no podemos ser "matemáticamente correctos" por piso/día
+                deficits.append({"piso": piso, "dia": dia, "causa": "Sin capacidad definida en hoja Capacidades"})
+                continue
+
+            # reservar cupos libres
+            libres = min(cupos_libres_diarios, cap)
+            cap_rest = cap - libres
+
+            # equipos elegibles
+            teams = {k: v for k, v in dot.items() if int(v) >= min_dotacion_para_garantia}
+
+            # mínimos diarios
+            mins = {t: _min_daily_for_team(int(v)) for t, v in teams.items()}
+            sum_mins = sum(mins.values())
+
+            if sum_mins > cap_rest:
+                # no alcanza ni para mínimos => matemáticamente imposible con esa capacidad
+                deficits.append({
+                    "piso": piso, "dia": dia,
+                    "causa": f"Capacidad insuficiente: mínimos({sum_mins}) > cap_restante({cap_rest})"
+                })
+                # asignar lo que se pueda proporcionalmente a mins (o 0)
+                alloc = _largest_remainder_allocation(mins, cap_rest)
+            else:
+                # asigna mínimos + resto proporcional a dotación
+                alloc = mins.copy()
+                extra = cap_rest - sum_mins
+                extra_alloc = _largest_remainder_allocation(teams, extra)
+                for t, v in extra_alloc.items():
+                    alloc[t] = alloc.get(t, 0) + v
+
+            # construir filas
+            total_asignado = 0
+            for t, c in alloc.items():
+                if c <= 0:
+                    continue
+                total_asignado += c
+                rows.append({"piso": piso, "dia": dia, "equipo": t, "cupos": int(c), "pct": 0})
+
+            # cupos libres al final
+            rows.append({"piso": piso, "dia": dia, "equipo": "Cupos libres", "cupos": int(libres), "pct": 0})
+
+            # sanity check
+            if total_asignado + libres != cap:
+                deficits.append({
+                    "piso": piso, "dia": dia,
+                    "causa": f"Mismatch: asignado({total_asignado + libres}) != capacidad({cap})"
+                })
+
+    return rows, deficits
+
     """
     Genera varias distribuciones aleatorias y elige la más EQUITATIVA.
 
@@ -2073,6 +2252,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
