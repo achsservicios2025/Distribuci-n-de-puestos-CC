@@ -2091,83 +2091,133 @@ elif menu == "Administrador":
         # Canvas sobre la imagen
         # =========================
         with col_left:
-            st.markdown(f"### 🗺️ Plano: {plano_path.name}")
+            st.subheader("🗺️ Plano (edición)")
 
-            # cargar imagen (PIL)
-            pil_img = PILImage.open(plano_path).convert("RGB")
+            # Piso seleccionado viene desde el panel derecho (st.session_state)
+            p_sel = st.session_state.get("editor_piso_sel", None)
+            if not p_sel:
+                p_sel = "Piso 1"
+                st.session_state["editor_piso_sel"] = p_sel
 
-            # zonas existentes para este piso
-            existing = zonas.get(p_sel, []) or []
+            # Normalizar
+            def norm_piso(x):
+                s = str(x).strip()
+                if not s.lower().startswith("piso"):
+                    s = f"Piso {s}"
+                return s
 
-            # convertir zonas guardadas a objetos para canvas (rect)
-            init_objects = []
-            for z in existing:
-                try:
-                    if z.get("type") != "rect":
+            p_sel = norm_piso(p_sel)
+            p_num = p_sel.replace("Piso", "").strip() or "1"
+
+            # Candidatos de archivo
+            file_candidates = [
+                PLANOS_DIR / f"piso{p_num}.png",
+                PLANOS_DIR / f"piso{p_num}.jpg",
+                PLANOS_DIR / f"Piso{p_num}.png",
+                PLANOS_DIR / f"Piso{p_num}.jpg",
+                PLANOS_DIR / f"piso_{p_num}.png",
+                PLANOS_DIR / f"piso_{p_num}.jpg",
+            ]
+            pim = next((p for p in file_candidates if p.exists()), None)
+
+            if not pim:
+                st.error(f"❌ No se encontró el plano para {p_sel}")
+                st.info("💡 Revisa que exista en /planos como piso1.png / piso1.jpg / Piso1.png")
+            else:
+                st.caption(f"🖼️ Plano: {pim.name}")
+
+                # Cargar imagen
+                pil_img = PILImage.open(pim).convert("RGBA")
+                img_w, img_h = pil_img.size
+
+                # ✅ “doble del tamaño” que se ve actualmente:
+                # antes estabas usando width=640 en tu editor viejo -> ahora 1280 de base
+                target_w = 1280
+
+                # Escala para mantener proporción (sin deformar)
+                scale = min(target_w / img_w, 2.0)  # limita a 2x real
+                canvas_w = int(img_w * scale)
+                canvas_h = int(img_h * scale)
+
+                # Imagen escalada como fondo
+                bg_img = pil_img.resize((canvas_w, canvas_h))
+
+                # Zonas existentes del piso
+                zonas = load_zones()
+                existing_zones = zonas.get(p_sel, []) or []
+
+                # Preparar objetos iniciales para el canvas (re-escalando al dibujar)
+                init_objects = []
+                for z in existing_zones:
+                    try:
+                        init_objects.append({
+                            "type": "rect",
+                            "left": float(z.get("left", 0)) * scale,
+                            "top": float(z.get("top", 0)) * scale,
+                            "width": float(z.get("width", 0)) * scale,
+                            "height": float(z.get("height", 0)) * scale,
+                            "fill": z.get("fill", hex_to_rgba(z.get("color", "#00A04A"), 0.30)),
+                            "stroke": z.get("stroke", z.get("color", "#00A04A")),
+                            "strokeWidth": z.get("strokeWidth", 2),
+                        })
+                    except Exception:
                         continue
-                    init_objects.append({
-                        "type": "rect",
-                        "left": float(z.get("left", 0)),
-                        "top": float(z.get("top", 0)),
-                        "width": float(z.get("width", 0)),
-                        "height": float(z.get("height", 0)),
-                        "fill": str(z.get("fill", "rgba(0,160,74,0.25)")),
-                        "stroke": str(z.get("stroke", "#00A04A")),
-                        "strokeWidth": float(z.get("strokeWidth", 2)),
-                    })
-                except Exception:
-                    continue
 
-            # color con alpha para relleno
-            fill_rgba = hex_to_rgba(color_sel, alpha=0.25)
+                # Color/equipo actuales desde panel derecho
+                selected_team = st.session_state.get("editor_team_sel", "")
+                selected_color = st.session_state.get("editor_color_sel", "#00A04A") or "#00A04A"
+                fill_rgba = hex_to_rgba(selected_color, 0.30)
 
-            canvas_result = st_canvas(
-                fill_color=fill_rgba,
-                stroke_color=color_sel,
-                stroke_width=2,
-                background_image=pil_img,
-                update_streamlit=True,
-                drawing_mode="rect",
-                initial_drawing={"version": "5.3.0", "objects": init_objects},
-                key=f"canvas_{p_sel}",
-                height=pil_img.size[1],
-                width=pil_img.size[0],
-            )
+                st_canvas_key = f"canvas_{p_sel}"
 
-            csave1, csave2 = st.columns([1, 1])
-            with csave1:
-                if st.button("💾 Guardar zonas", type="primary", key=f"save_canvas_{p_sel}"):
-                    objs = []
-                    if canvas_result and canvas_result.json_data and "objects" in canvas_result.json_data:
-                        objs = canvas_result.json_data["objects"] or []
+                canvas_result = st_canvas(
+                    fill_color=fill_rgba,
+                    stroke_width=2,
+                    stroke_color=selected_color,
+                    background_image=bg_img,          # ✅ se ve el plano
+                    update_streamlit=True,
+                    height=canvas_h,
+                    width=canvas_w,
+                    drawing_mode="rect",
+                    initial_drawing={"version": "4.4.0", "objects": init_objects},
+                    key=st_canvas_key,
+                )
+
+                # Guardar zonas
+                if st.button("💾 Guardar zonas", type="primary", key=f"save_zones_{p_sel}"):
+
+                    def _unscale(v):
+                        try:
+                            return float(v) / float(scale) if scale and scale > 0 else float(v)
+                        except Exception:
+                            return 0.0
 
                     new_zones = []
-                    for o in objs:
-                        if o.get("type") != "rect":
-                            continue
-                        # Guardamos metadata de equipo + color
-                        new_zones.append({
-                            "type": "rect",
-                            "team": equipo_sel,
-                            "color": color_sel,
-                            "left": o.get("left", 0),
-                            "top": o.get("top", 0),
-                            "width": o.get("width", 0),
-                            "height": o.get("height", 0),
-                            "fill": o.get("fill", fill_rgba),
-                            "stroke": o.get("stroke", color_sel),
-                            "strokeWidth": o.get("strokeWidth", 2),
-                        })
+                    if canvas_result and canvas_result.json_data:
+                        objs = canvas_result.json_data.get("objects", []) or []
+                        for o in objs:
+                            if o.get("type") != "rect":
+                                continue
+
+                            new_zones.append({
+                                "type": "rect",
+                                "team": selected_team,
+                                "color": selected_color,
+                                "left": _unscale(o.get("left", 0)),
+                                "top": _unscale(o.get("top", 0)),
+                                "width": _unscale(o.get("width", 0)),
+                                "height": _unscale(o.get("height", 0)),
+                                "fill": o.get("fill", fill_rgba),
+                                "stroke": o.get("stroke", selected_color),
+                                "strokeWidth": o.get("strokeWidth", 2),
+                            })
 
                     zonas[p_sel] = new_zones
                     if save_zones(zonas):
-                        st.success(f"✅ Guardadas {len(new_zones)} zonas para {p_sel}")
+                        st.success(f"✅ Guardadas {len(new_zones)} zonas en {p_sel}")
                         st.rerun()
                     else:
-                        st.error("❌ Error guardando zonas")
-
-            with csave2:
-                st.info(f"Zonas actuales guardadas: {len(zonas.get(p_sel, []) or [])}")
+                        st.error("❌ No se pudieron guardar las zonas")
 
     with t3:
         st.subheader("Descargas")
@@ -2672,6 +2722,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
