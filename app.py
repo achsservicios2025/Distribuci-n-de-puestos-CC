@@ -279,7 +279,7 @@ def generate_balanced_distribution(
     ignore_params: bool,
     num_attempts: int = 80,
     seed: Optional[int] = None
-):
+)
     def _get_col(df, contains):
     cols = list(df.columns)
     for c in cols:
@@ -2254,6 +2254,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
