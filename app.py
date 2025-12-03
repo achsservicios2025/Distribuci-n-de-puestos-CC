@@ -2209,8 +2209,15 @@ elif menu == "Administrador":
             use_w = min(canvas_w, max_w)
             use_h = int(canvas_h * (use_w / canvas_w))
 
+            import io
+
+            # ✅ siempre crea bg_bytes base
+            buf0 = io.BytesIO()
+            bg_img.save(buf0, format="PNG")
+            bg_bytes = buf0.getvalue()
+
+            # ✅ si cambias tamaño, lo reemplazas por el resized
             if use_w != canvas_w:
-                import io
                 bg_img2 = bg_img.resize((use_w, use_h))
                 buf2 = io.BytesIO()
                 bg_img2.save(buf2, format="PNG")
@@ -3029,6 +3036,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
