@@ -146,37 +146,6 @@ import streamlit.components.v1 as components
 # ---------------------------------------------------------
 st.set_page_config(page_title="Distribución de Puestos", layout="wide")
 
-# 1. Verificar si existen los secretos
-if "gcp_service_account" not in st.secrets:
-    st.error("🚨 ERROR CRÍTICO: No se encuentran los secretos [gcp_service_account]. Revisa el formato TOML en Streamlit Cloud.")
-    st.stop()
-
-# 2. Intentar conectar y mostrar el error real
-try:
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    # Verificar formato de private_key
-    pk = creds_dict.get("private_key", "")
-    if "-----BEGIN PRIVATE KEY-----" not in pk:
-        st.error("🚨 ERROR EN PRIVATE KEY: No parece una llave válida. Revisa que incluya -----BEGIN PRIVATE KEY-----")
-        st.stop()
-        
-    # Prueba de conexión directa
-    from google.oauth2.service_account import Credentials
-    import gspread
-    
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    
-    # Prueba de abrir la hoja
-    sheet_name = st.secrets["sheets"]["sheet_name"]
-    sh = client.open(sheet_name)
-    # st.success(f"✅ CONEXIÓN EXITOSA con la hoja: {sheet_name}") # COMENTADO PARA NO MOSTRAR MENSAJE
-
-except Exception as e:
-    st.error(f"🔥 LA CONEXIÓN FALLÓ AQUÍ: {str(e)}")
-    st.stop()
-
 # ----------------------------------------------------------------
 ORDER_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 PLANOS_DIR = Path("planos")
@@ -802,7 +771,14 @@ if menu == "Vista pública":
                 # Obtener reservas de este piso en el mes seleccionado
                 reservas_piso = []
                 if not all_res.empty:
-                    mask_piso = (all_res["piso"] == piso_cal) & (all_res["team_area"] == "Cupos libres")
+                    def _norm_piso_local(x):
+                        s = str(x).strip()
+                        if not s.lower().startswith("piso"):
+                            s = f"Piso {s}"
+                        return s
+
+                    mask_piso = (all_res["piso"].astype(str).map(_norm_piso_local) == str(piso_cal)) & (all_res["team_area"] == "Cupos libres")
+
                     for _, r in all_res[mask_piso].iterrows():
                         try:
                             fecha_res = pd.to_datetime(r["reservation_date"])
@@ -1019,15 +995,12 @@ elif menu == "Reservas":
                             st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
                         elif user_has_reservation(conn, em, str(fe)):
                             st.error("Ya tienes una reserva registrada para esta fecha.")
-                        elif count_monthly_free_spots(conn, area_equipo, fe) >= 2:
-                            st.error(f"El equipo/área '{area_equipo}' ha alcanzado el límite de 2 reservas mensuales.")
+                        elif count_monthly_free_spots(conn, em, fe) >= 2:
+                            st.error("Has alcanzado el límite de 2 reservas mensuales.")
                         elif disponibles <= 0:
                             st.error("Lo sentimos, el cupo se acaba de agotar.")
                         else:
-                            pi_norm = str(pi).strip()
-                            if not pi_norm.lower().startswith("piso"):
-                                pi_norm = f"Piso {pi_norm}"
-                            add_reservation(conn, area_equipo, em, pi_norm, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
+                            add_reservation(conn, area_equipo, em, pi, str(fe), "Cupos libres", datetime.datetime.now(datetime.timezone.utc).isoformat())
                             msg = f"✅ Reserva Confirmada:\n\n- Área/Equipo: {area_equipo}\n- Fecha: {fe}\n- Piso: {pi}\n- Tipo: Puesto Flex"
                             st.success(msg)
                             
@@ -2100,6 +2073,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
