@@ -503,422 +503,6 @@ def hex_to_rgba(hex_color, alpha=0.3):
         return f"rgba({r}, {g}, {b}, {alpha})"
     return f"rgba(0, 160, 74, {alpha})"
 
-def create_enhanced_drawing_component(img_path, existing_zones, selected_team="", selected_color="#00A04A", width=700):
-    """Componente profesional de dibujo mejorado con selección de equipo y color"""
-    
-    try:
-        # Convertir imagen a base64
-        with open(img_path, "rb") as f:
-            img_data = base64.b64encode(f.read()).decode()
-        
-        # Preparar zonas existentes para JSON
-        safe_zones = []
-        for zone in existing_zones:
-            safe_zone = {
-                'x': zone.get('x', 0),
-                'y': zone.get('y', 0),
-                'w': zone.get('w', 0),
-                'h': zone.get('h', 0),
-                'color': zone.get('color', '#00A04A'),
-                'team': zone.get('team', 'Sin nombre')
-            }
-            safe_zones.append(safe_zone)
-        
-        existing_zones_json = json.dumps(safe_zones)
-        
-        canvas_width = width
-        html_height = 650
-        
-        # HTML/JS Componente de dibujo profesional MEJORADO
-        html_code = f'''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Editor de Planos</title>
-            <style>
-                body {{
-                    font-family: 'Arial', sans-serif;
-                    margin: 0;
-                    padding: 10px;
-                    background: #f8f9fa;
-                }}
-                .editor-container {{
-                    max-width: {canvas_width}px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 10px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                    overflow: hidden;
-                }}
-                .editor-header {{
-                    background: #00A04A;
-                    color: white;
-                    padding: 10px 15px;
-                    margin: 0;
-                    font-size: 16px;
-                }}
-                .editor-controls {{
-                    padding: 10px 15px;
-                    background: #f8f9fa;
-                    border-bottom: 1px solid #dee2e6;
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 5px;
-                }}
-                .control-btn {{
-                    background: #007bff;
-                    color: white;
-                    border: none;
-                    padding: 6px 12px;
-                    border-radius: 5px;
-                    cursor: pointer;
-                    font-size: 12px;
-                    flex: 1;
-                    min-width: 120px;
-                }}
-                .control-btn:hover {{
-                    background: #0056b3;
-                }}
-                .control-btn.delete {{
-                    background: #dc3545;
-                }}
-                .control-btn.delete:hover {{
-                    background: #c82333;
-                }}
-                .control-btn.save {{
-                    background: #28a745;
-                }}
-                .control-btn.save:hover {{
-                    background: #218838;
-                }}
-                .canvas-container {{
-                    position: relative;
-                    background: white;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    padding: 5px;
-                }}
-                #drawingCanvas {{
-                    display: block;
-                    cursor: crosshair;
-                    border: 1px solid #ccc;
-                    max-width: 100%;
-                }}
-                .status-panel {{
-                    padding: 10px 15px;
-                    background: #e9ecef;
-                    border-top: 1px solid #dee2e6;
-                    font-size: 12px;
-                }}
-                .coordinates {{
-                    font-family: monospace;
-                    background: #2b303b;
-                    color: #00ff00;
-                    padding: 8px;
-                    border-radius: 5px;
-                    margin: 5px 0;
-                    font-size: 11px;
-                }}
-                .zones-list {{
-                    max-height: 150px;
-                    overflow-y: auto;
-                    margin: 10px 0;
-                }}
-                .zone-item {{
-                    padding: 5px;
-                    margin: 2px 0;
-                    background: white;
-                    border-radius: 3px;
-                    font-size: 11px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="editor-container">
-                <h3 class="editor-header">🎨 Editor de Planos</h3>
-                
-                <div class="editor-controls">
-                    <button class="control-btn" onclick="startDrawing()">✏️ Dibujar</button>
-                    <button class="control-btn" onclick="clearLast()">🗑️ Borrar Último</button>
-                    <button class="control-btn delete" onclick="clearAll()">🗑️ Borrar Todo</button>
-                    <button class="control-btn save" onclick="saveZones()">💾 Guardar Zonas</button>
-                </div>
-                <div class="canvas-container">
-                    <canvas id="drawingCanvas"></canvas>
-                </div>
-                <div class="status-panel">
-                    <div class="coordinates">
-                        <strong>Coordenadas:</strong><br>
-                        <span id="coordsDisplay">X: 0, Y: 0</span>
-                    </div>
-                    <div class="zones-list" id="zonesList">
-                        <strong>Zonas creadas:</strong>
-                        <div id="zonesContainer"></div>
-                    </div>
-                </div>
-            </div>
-            <img id="sourceImage" src="data:image/png;base64,{img_data}" style="display:none">
-            
-            <script>
-                // Variables globales
-                let canvas = document.getElementById('drawingCanvas');
-                let ctx = canvas.getContext('2d');
-                let img = document.getElementById('sourceImage');
-                let isDrawing = false;
-                let startX, startY, currentX, currentY;
-                let rectangles = JSON.parse(`{existing_zones_json}`.replace(/&quot;/g, '"'));
-                let currentRect = null;
-                let canvasWidth = {canvas_width};
-                let canvasHeight = 0;
-                let selectedTeam = "{selected_team}";
-                let selectedColor = "{selected_color}";
-                
-                // Inicializar cuando la imagen cargue
-                img.onload = function() {{
-                    try {{
-                        const aspectRatio = img.naturalHeight / img.naturalWidth;
-                        canvasHeight = Math.round(canvasWidth * aspectRatio);
-                        
-                        canvas.width = canvasWidth;
-                        canvas.height = canvasHeight;
-                        
-                        drawImageAndZones();
-                        updateZonesList();
-                        console.log('Canvas inicializado correctamente');
-                    }} catch (e) {{
-                        console.error('Error al inicializar canvas:', e);
-                        alert('Error al cargar el plano: ' + e.message);
-                    }}
-                }};
-                
-                // Manejar errores de carga de imagen
-                img.onerror = function() {{
-                    console.error('Error al cargar la imagen');
-                    alert('Error: No se pudo cargar la imagen del plano');
-                }};
-                
-                // Si la imagen ya está cargada, inicializar de inmediato
-                if (img.complete && img.naturalWidth > 0) {{
-                    const aspectRatio = img.naturalHeight / img.naturalWidth;
-                    canvasHeight = Math.round(canvasWidth * aspectRatio);
-                    canvas.width = canvasWidth;
-                    canvas.height = canvasHeight;
-                    drawImageAndZones();
-                    updateZonesList();
-                    console.log('Canvas inicializado (imagen ya cargada)');
-                }}
-                
-                function drawImageAndZones() {{
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    if (currentRect) {{
-                        drawRectangle(currentRect);
-                    }}
-                    
-                    rectangles.forEach(rect => {{
-                        const scaleX = canvas.width / img.naturalWidth;
-                        const scaleY = canvas.height / img.naturalHeight;
-                        
-                        const canvasRect = {{
-                            x: rect.x * scaleX,
-                            y: rect.y * scaleY,
-                            w: rect.w * scaleX,
-                            h: rect.h * scaleY,
-                            color: rect.color,
-                            team: rect.team
-                        }};
-                        
-                        drawRectangle(canvasRect);
-                    }});
-                }}
-                
-                function hexToRgba(hex, alpha=0.25){
-                    hex = (hex || "#00A04A").replace("#","");
-                    const r = parseInt(hex.substring(0,2),16);
-                    const g = parseInt(hex.substring(2,4),16);
-                    const b = parseInt(hex.substring(4,6),16);
-                    return `rgba(${r},${g},${b},${alpha})`;
-                }
-
-                function drawRectangle(rect) {{
-                    ctx.fillStyle = hexToRgba(rect.color || selectedColor, 0.25);
-                    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-                    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-                    
-                    // Relleno semitransparente
-                    ctx.fillStyle = (rect.color || selectedColor) + '40';
-                    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-                }}
-                
-                function startDrawing() {{
-                    isDrawing = true;
-                    canvas.style.cursor = 'crosshair';
-                }}
-                
-                function getCanvasCoordinates(e) {{
-                    const rect = canvas.getBoundingClientRect();
-                    const x = (e.pageX - rect.left - window.pageXOffset);
-                    const y = (e.pageY - rect.top - window.pageYOffset);
-                    
-                    const scaleX = canvas.width / rect.width;
-                    const scaleY = canvas.height / rect.height;
-                    
-                    return {{
-                        x: x * scaleX,
-                        y: y * scaleY
-                    }};
-                }}
-                
-                canvas.addEventListener('mousedown', function(e) {{
-                    if (!isDrawing) return;
-                    
-                    const coords = getCanvasCoordinates(e);
-                    startX = coords.x;
-                    startY = coords.y;
-                    
-                    currentRect = {{
-                        x: startX, y: startY, w: 0, h: 0,
-                        color: selectedColor,
-                        team: selectedTeam || 'Nueva Zona'
-                    }};
-                }});
-                
-                canvas.addEventListener('mousemove', function(e) {{
-                    if (!isDrawing || !currentRect) return;
-                    
-                    const coords = getCanvasCoordinates(e);
-                    currentX = coords.x;
-                    currentY = coords.y;
-                    
-                    currentRect.w = currentX - startX;
-                    currentRect.h = currentY - startY;
-                    
-                    document.getElementById('coordsDisplay').textContent = 
-                        `X: ${{Math.round(startX)}}, Y: ${{Math.round(startY)}}, ` +
-                        `Ancho: ${{Math.round(currentRect.w)}}, Alto: ${{Math.round(currentRect.h)}}`;
-                    
-                    drawImageAndZones();
-                }});
-                
-                canvas.addEventListener('mouseup', function(e) {{
-                    if (!isDrawing || !currentRect) return;
-                    
-                    if (Math.abs(currentRect.w) > 10 && Math.abs(currentRect.h) > 10) {{
-                        const scaleX = img.naturalWidth / canvas.width;
-                        const scaleY = img.naturalHeight / canvas.height;
-                        
-                        const newRect = {{
-                            x: Math.round(currentRect.x * scaleX),
-                            y: Math.round(currentRect.y * scaleY),
-                            w: Math.round(currentRect.w * scaleX),
-                            h: Math.round(currentRect.h * scaleY),
-                            color: selectedColor,
-                            team: selectedTeam || 'Nueva Zona'
-                        }};
-                        
-                        rectangles.push(newRect);
-                        updateZonesList();
-                        emitZones('auto'); // ✅ auto-guardar real hacia Streamlit
-                    
-                    currentRect = null;
-                    isDrawing = false;
-                    canvas.style.cursor = 'default';
-                    drawImageAndZones();
-                }});
-                
-                function clearLast() {{
-                    if (rectangles.length > 0) {{
-                        rectangles.pop();
-                        drawImageAndZones();
-                        updateZonesList();
-                    }}
-                }}
-                
-                function clearAll() {{
-                    if (rectangles.length > 0) {{
-                        if (confirm('¿Estás seguro de que quieres eliminar TODAS las zonas?')) {{
-                            rectangles = [];
-                            drawImageAndZones();
-                            updateZonesList();
-                        }}
-                    }}
-                }}
-                
-                function updateZonesList() {{
-                    const container = document.getElementById('zonesContainer');
-                    container.innerHTML = '';
-                    
-                    rectangles.forEach((rect, index) => {{
-                        const zoneDiv = document.createElement('div');
-                        zoneDiv.className = 'zone-item';
-                        zoneDiv.style.borderLeft = `3px solid ${{rect.color}}`;
-                        zoneDiv.innerHTML = `${{index + 1}}. ${{rect.team}} (${{Math.round(rect.x)}}, ${{Math.round(rect.y)}})`;
-                        container.appendChild(zoneDiv);
-                    }});
-                }}
-                
-                function emitZones(actionType) {{
-                    const payload = {{
-                        type: 'zones_saved',
-                        piso: '{p_sel}',
-                        action: actionType,
-                        zones: rectangles
-                    }};
-                    
-                    try {{
-                        if (window.parent) {{
-                            window.parent.postMessage(payload, '*');
-                        }}
-                        localStorage.setItem('zones_save_{p_sel}', JSON.stringify(payload));
-                    }} catch (err) {{
-                        console.error('Error enviando zonas a Streamlit:', err);
-                    }}
-                }}
-                
-                function saveZones() {{
-                    emitZones('manual');
-                    alert('✅ Zonas guardadas automáticamente! (' + rectangles.length + ' zonas)');
-                }}
-                
-                // Auto-guardar silencioso al terminar de dibujar
-                canvas.addEventListener('mouseup', function(e) {{
-                    if (isDrawing && currentRect && Math.abs(currentRect.w) > 10 && Math.abs(currentRect.h) > 10) {{
-                        setTimeout(() => emitZones('auto'), 300);
-                    }}
-                }});
-                
-                // Mostrar coordenadas al mover el mouse
-                canvas.addEventListener('mousemove', function(e) {{
-                    const coords = getCanvasCoordinates(e);
-                    
-                    if (!isDrawing) {{
-                        document.getElementById('coordsDisplay').textContent = 
-                            `X: ${{Math.round(coords.x)}}, Y: ${{Math.round(coords.y)}}`;
-                    }}
-                }});
-                
-                // Inicializar cuando el DOM esté listo
-                document.addEventListener('DOMContentLoaded', function() {{
-                    if (img.complete) {{
-                        img.onload();
-                    }}
-                }});
-            </script>
-        </body>
-        </html>
-        '''
-        
-        # Componente que puede recibir valores de retorno
-        # Aumentar altura para asegurar que se vea todo
-        return components.html(html_code, width=canvas_width + 50, height=html_height + 100, scrolling=True)
-        
-    except Exception as e:
-        st.error(f"Error al crear el componente de dibujo: {str(e)}")
-        return None
-
 # --- GENERADORES DE PDF ---
 def create_merged_pdf(piso_sel, conn, global_logo_path):
     # Blindaje: piso_sel puede venir None / NaN / int, etc.
@@ -1874,367 +1458,140 @@ elif menu == "Administrador":
             st.info("Sube y procesa un Excel para generar una propuesta.")
 
     with t2:
-        st.info("Editor de Zonas - Versión Profesional")
-        zonas = load_zones()
-        
-        # MODIFICADO: Leer con funcion importada
-        df_d = read_distribution_df(conn)
-        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
-        
-        # Layout en columnas: Editor a la izquierda, Configuración a la derecha
-        col_left, col_right = st.columns([2, 1])
-        
-        with col_left:
-            # Limpiar lista de nulos
-            pisos_list_clean = [p for p in pisos_list if p is not None]
-            if not pisos_list_clean: pisos_list_clean = ["Piso 1"]
+    st.info("Editor de Zonas - Versión Profesional")
+    zonas = load_zones()
 
-            p_sel = st.selectbox("Piso", pisos_list_clean, key="editor_piso")
-            
-            # Blindaje: Validar que p_sel no sea None
-            if p_sel:
-                p_num = str(p_sel).replace("Piso ", "").strip()
-            else:
-                p_num = "1"
+    df_d = read_distribution_df(conn)
+    pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
 
-            # Búsqueda de Archivo
-            file_base = f"piso{p_num}"
-            pim = PLANOS_DIR / f"{file_base}.png"
-            if not pim.exists(): 
-                pim = PLANOS_DIR / f"{file_base}.jpg"
-                if not pim.exists():
-                    pim = PLANOS_DIR / f"Piso{p_num}.png"
-            
-            if pim.exists():
-                try:
-                    # Cargar zonas existentes para este piso
-                    existing_zones = zonas.get(p_sel, [])
-                    
-                    st.success(f"✅ Plano cargado: {pim.name}")
-                    
-                    # Obtener equipo y color seleccionados
-                    selected_team = st.session_state.get(f"team_{p_sel}", "")
-                    selected_color = st.session_state.get(f"color_{p_sel}", "#00A04A")
-                    
-                    # Botón para actualizar el componente cuando cambien equipo/color
-                    if st.button("🔄 Actualizar Editor con Equipo/Color Seleccionado", key=f"update_editor_{p_sel}"):
-                        st.rerun()
-                    
-                    # Mostrar componente de dibujo mejorado con guardado automático
-                    st.markdown("### 🎨 Herramientas de Dibujo")
-                    
-                    # Mostrar información actual
-                    if selected_team:
-                        st.info(f"🎨 **Equipo seleccionado:** {selected_team} | **Color:** {selected_color}")
-                    else:
-                        st.warning("⚠️ Selecciona un equipo y color en el panel derecho antes de dibujar")
-                    
-                    # Renderizar componente personalizado basado en Streamlit Components
-                    editor_result = zone_editor(
-                        img_path=str(pim),
-                        existing_zones=existing_zones,
-                        selected_team=selected_team,
-                        selected_color=selected_color or "#00A04A",
-                        width=640,
-                        key=f"zone_editor_{p_sel}"
-                    )
-                    
-                    # Botones de acción auxiliares
-                    col_btn1, col_btn2 = st.columns(2)
-                    
-                    if col_btn1.button("🔄 Recargar Zonas", key=f"reload_{p_sel}"):
-                        zonas = load_zones()
-                        st.rerun()
-                        
-                    if col_btn2.button("🗑️ Limpiar Todas", key=f"clear_all_{p_sel}"):
-                        if st.session_state.get(f"confirm_clear_{p_sel}", False):
-                            zonas[p_sel] = []
-                            if save_zones(zonas):
-                                st.success("✅ Todas las zonas eliminadas")
-                                st.session_state[f"confirm_clear_{p_sel}"] = False
-                                st.rerun()
-                            else:
-                                st.error("❌ Error al eliminar las zonas")
-                        else:
-                            st.session_state[f"confirm_clear_{p_sel}"] = True
-                            st.warning("⚠️ Haz clic de nuevo para confirmar la eliminación de TODAS las zonas")
-                    
-                    # Procesar respuesta del componente
-                    if editor_result:
-                        try:
-                            zonas_component = editor_result.get("zones", [])
-                            action = editor_result.get("action", "manual")
-                            if isinstance(zonas_component, list):
-                                zonas[p_sel] = zonas_component
-                                if save_zones(zonas):
-                                    st.success(f"✅ {len(zonas_component)} zonas guardadas automáticamente.")
-                                    st.session_state[f"last_zones_{p_sel}"] = json.dumps(zonas_component, sort_keys=True)
-                                    if action == "manual":
-                                        st.rerun()
-                                else:
-                                    st.error("❌ Error al guardar las zonas. Intenta nuevamente.")
-                        except Exception:
-                            st.warning("⚠️ No se pudo procesar la respuesta del editor.")
-                    
-                    st.info("💡 **Instrucciones:** 1) Selecciona equipo y color a la derecha. 2) Dibuja zonas en el editor. 3) Haz clic en '💾 Guardar Zonas' dentro del editor para guardar automáticamente.")
-                            
-                except Exception as e:
-                    st.error(f"❌ Error en el editor: {str(e)}")
-            else:
-                st.error(f"❌ No se encontró el plano: {p_sel}")
-                st.info(f"💡 Busqué en: {pim}")
-        
-        with col_right:
-            st.subheader("🎨 Configuración de Zonas")
-            
-            # Preparar lista de equipos
-            # Blindaje: Si p_sel es None, usamos un valor dummy para no romper el código
-            piso_str = str(p_sel) if p_sel else "1"
-            
-            d_sel = st.selectbox("Día Ref.", ORDER_DIAS, key=f"dia_ref_{piso_str}")
-            current_seats_dict = {}
-            eqs = [""]
-            
-            if not df_d.empty and p_sel:
-                subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-                current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                eqs += sorted(subset['equipo'].unique().tolist())
-            
-            # --- CORRECCIÓN DEL ERROR ---
-            # Usamos piso_str que ya está convertido a string seguro
-            salas_piso = []
-            if "1" in piso_str:
-                salas_piso = ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
-            elif "2" in piso_str:
-                salas_piso = ["Sala Reuniones - Piso 2"]
-            elif "3" in piso_str:
-                salas_piso = ["Sala Reuniones - Piso 3"]
-            eqs += salas_piso
-            # -----------------------------
+    col_left, col_right = st.columns([2, 1])
 
-            # Selector de equipo y color
-            tn = st.selectbox("Equipo / Sala", eqs, key=f"team_{piso_str}")
-            tc = st.color_picker("Color", "#00A04A", key=f"color_{piso_str}")
+    # ---------- helpers ----------
+    def norm_piso(x):
+        s = str(x).strip()
+        if not s.lower().startswith("piso"):
+            s = f"Piso {s}"
+        return s
 
-            if tn and tn in current_seats_dict:
-                st.info(f"📊 Cupos: {current_seats_dict[tn]}")
-            
-            st.markdown("---")
-            
-            # Mostrar zonas guardadas
-            if p_sel in zonas and zonas[p_sel]:
-                st.success(f"✅ {len(zonas[p_sel])} zonas guardadas para {p_sel}")
-                
-                # Editor de zonas existentes
-                st.markdown("#### ✏️ Editar Zona Existente")
-                zone_options = [
-                    f"{i+1}. {z.get('team', 'Sin nombre')}"
-                    for i, z in enumerate(zonas[p_sel])
-                ]
-                
-                if zone_options:
-                    selected_zone_idx = st.selectbox(
-                        "Selecciona una zona:",
-                        range(len(zone_options)),
-                        format_func=lambda x: zone_options[x],
-                        key=f"zone_selector_{p_sel}"
-                    )
-                    
-                    if selected_zone_idx is not None:
-                        zone = zonas[p_sel][selected_zone_idx]
-                        
-                        new_team = st.text_input(
-                            "Nombre del equipo:",
-                            value=zone.get('team', 'Nueva Zona'),
-                            key=f"team_edit_{selected_zone_idx}_{p_sel}"
-                        )
-                        
-                        new_color = st.color_picker(
-                            "Color:",
-                            value=zone.get('color', '#00A04A'),
-                            key=f"color_edit_{selected_zone_idx}_{p_sel}"
-                        )
-                        
-                        col_edit1, col_edit2 = st.columns(2)
-                        
-                        with col_edit1:
-                            if st.button("💾 Actualizar Zona", key=f"update_{selected_zone_idx}_{p_sel}"):
-                                zonas[p_sel][selected_zone_idx]['team'] = new_team
-                                zonas[p_sel][selected_zone_idx]['color'] = new_color
-                                if save_zones(zonas):
-                                    st.success("✅ Zona actualizada")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Error al guardar la zona")
-                        
-                        with col_edit2:
-                            if st.button("🗑️ Eliminar Zona", key=f"delete_{selected_zone_idx}_{p_sel}"):
-                                zonas[p_sel].pop(selected_zone_idx)
-                                if save_zones(zonas):
-                                    st.success("✅ Zona eliminada")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Error al eliminar la zona")
-                
-                # Leyenda de colores
-                st.markdown("#### 🎨 Leyenda de Colores")
-                for i, z in enumerate(zonas[p_sel]):
-                    col_leg1, col_leg2 = st.columns([1, 4])
-                    with col_leg1:
-                        st.markdown(
-                            f'<div style="width:30px;height:30px;background-color:{z.get("color", "#00A04A")};border:1px solid #ccc;"></div>',
-                            unsafe_allow_html=True
-                        )
-                    with col_leg2:
-                        st.write(f"**{z.get('team', 'Sin nombre')}**")
-                        
-            else:
-                st.warning("ℹ️ No hay zonas guardadas para este piso. Usa el editor de la izquierda para crear zonas.")
-            
-            st.markdown("---")
-            st.markdown("### 📝 Instrucciones")
-            st.info("""
-            1. Selecciona un **Equipo** y un **Color** en el panel derecho
-            2. En el editor, haz clic en **✏️ Dibujar**
-            3. Dibuja un rectángulo en el mapa arrastrando el mouse
-            4. Haz clic en **💾 Guardar Zonas** en el editor para guardar automáticamente
-            5. Las zonas se guardarán automáticamente y la página se actualizará
-            """)
+    # limpiar nulos
+    pisos_list_clean = [norm_piso(p) for p in pisos_list if p is not None and str(p).strip() != ""]
+    if not pisos_list_clean:
+        pisos_list_clean = ["Piso 1"]
 
-        # Sección de personalización de título y leyenda (fuera de las columnas)
-        st.divider()
-        st.subheader("Personalización Título y Leyenda")
-        with st.expander("🎨 Editar Estilos", expanded=True):
-            align_options = ["Izquierda", "Centro", "Derecha"]
-            
-            tm = st.text_input("Título Principal", f"Distribución {p_sel}", key=f"title_{p_sel}")
-            ts = st.text_input("Subtítulo (Opcional)", f"Día: {d_sel}", key=f"subtitle_{p_sel}")
-            
-            st.markdown("##### Estilos del Título Principal")
-            cf1, cf2, cf3 = st.columns(3)
-            ff_t = cf1.selectbox("Tipografía (Título)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_t_{p_sel}")
-            fs_t = cf2.selectbox("Tamaño Letra (Título)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=9, key=f"size_t_{p_sel}")
-            align = cf3.selectbox("Alineación (Título)", align_options, index=1, key=f"align_{p_sel}")
-            
-            st.markdown("---")
-            st.markdown("##### Estilos del Subtítulo")
-            cs1, cs2, cs3 = st.columns(3)
-            ff_s = cs1.selectbox("Tipografía (Subtítulo)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_s_{p_sel}")
-            fs_s = cs2.selectbox("Tamaño Letra (Subtítulo)", [10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 80], index=5, key=f"size_s_{p_sel}")
-            align_s = cs3.selectbox("Alineación (Subtítulo)", align_options, index=1, key=f"align_s_{p_sel}")
-            
-            st.markdown("---")
-            st.markdown("##### Estilos de la Leyenda")
-            cl1, cl2, cl3 = st.columns(3)
-            ff_l = cl1.selectbox("Tipografía (Leyenda)", ["Arial", "Arial Black", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Impact", "Lucida Console", "Roboto", "Segoe UI", "Tahoma", "Times New Roman", "Trebuchet MS", "Verdana"], key=f"font_l_{p_sel}", index=0)
-            fs_l = cl2.selectbox("Tamaño Letra (Leyenda)", [8, 10, 12, 14, 16, 18, 20, 24, 28, 32], index=3, key=f"size_l_{p_sel}")
-            align_l = cl3.selectbox("Alineación (Leyenda)", align_options, index=0, key=f"align_l_{p_sel}")
-            
-            st.markdown("---")
-            cg1, cg2, cg3, cg4 = st.columns(4)
-            lg = cg1.checkbox("Logo", True, key=f"chk_logo_{p_sel}")
-            ln = cg2.checkbox("Mostrar Leyenda", True, key=f"chk_legend_{p_sel}")
-            align_logo = cg3.selectbox("Alineación Logo", align_options, index=0, key=f"logo_align_{p_sel}")
-            lw = cg4.slider("Ancho Logo", 50, 300, 150, key=f"logo_w_{p_sel}")
-            
-            cc1, cc2 = st.columns(2)
-            bg = cc1.color_picker("Fondo Header", "#FFFFFF", key=f"bg_{p_sel}")
-            tx = cc2.color_picker("Color Texto", "#000000", key=f"tx_{p_sel}")
+    with col_left:
+        p_sel = st.selectbox("Piso", pisos_list_clean, key="editor_piso")
+        p_sel = norm_piso(p_sel)
 
-        fmt_sel = st.selectbox("Formato:", ["Imagen (PNG)", "Documento (PDF)"], key=f"fmt_{p_sel}")
-        f_code = "PNG" if "PNG" in fmt_sel else "PDF"
-        
-        # Preparar configuración
-        conf = {
-            "title_text": tm,
-            "subtitle_text": ts,
-            "title_font": ff_t,
-            "title_size": fs_t,
-            "subtitle_font": ff_s,
-            "subtitle_size": fs_s,
-            "legend_font": ff_l,
-            "legend_size": fs_l,
-            "alignment": align,
-            "subtitle_align": align_s,
-            "legend_align": align_l,
-            "bg_color": bg,
-            "title_color": tx,
-            "subtitle_color": "#666666",
-            "use_logo": lg,
-            "use_legend": ln,
-            "logo_width": lw,
-            "logo_align": align_logo
-        }
-        # Guardar config en session_state para usarla en dossier PDF
-        st.session_state['last_style_config'] = conf
-        
-        # Obtener current_seats_dict
-        current_seats_dict = {}
-        if not df_d.empty:
-            subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-            current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-        
-        # Verificar que hay zonas guardadas antes de generar
-        zonas_check = load_zones()
-        has_zones_for_piso = p_sel in zonas_check and zonas_check[p_sel] and len(zonas_check[p_sel]) > 0
-        
-        if not has_zones_for_piso:
-            st.warning(f"⚠️ No hay zonas guardadas para {p_sel}. Ve a 'Editor Visual de Zonas' para crear zonas primero.")
-        
-        # Generar automáticamente al cambiar opciones
-        if st.button("🎨 Generar Vista Previa", key=f"preview_{p_sel}", type="primary"):
-            # Recargar zonas antes de generar para asegurar que tenemos los datos más recientes
-            zonas_check = load_zones()
-            has_zones_for_piso = p_sel in zonas_check and zonas_check[p_sel] and len(zonas_check[p_sel]) > 0
-            
-            if not has_zones_for_piso:
-                st.error("❌ No se puede generar el plano sin zonas. Crea zonas primero en 'Editor Visual de Zonas'.")
-            else:
-                try:
-                    # Asegurar que tenemos los datos más recientes
-                    current_seats_dict = {}
-                    if not df_d.empty:
-                        subset = df_d[(df_d['piso'] == p_sel) & (df_d['dia'] == d_sel)]
-                        current_seats_dict = dict(zip(subset['equipo'], subset['cupos']))
-                    
-                    out = generate_colored_plan(p_sel, d_sel, current_seats_dict, f_code, conf, global_logo_path)
-                    if out and Path(out).exists():
-                        st.success("✅ Vista previa generada correctamente!")
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Error al generar el plano. Zonas encontradas: {len(zonas_check.get(p_sel, []))}. Verifica que las zonas estén guardadas correctamente.")
-                except Exception as e:
-                    st.error(f"❌ Error al generar el plano: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
-        
-        # Mostrar vista previa si existe
-        ds = d_sel.lower().replace("é","e").replace("á","a")
-        fpng = COLORED_DIR / f"piso_{p_num}_{ds}_combined.png"
-        fpdf = COLORED_DIR / f"piso_{p_num}_{ds}_combined.pdf"
-        
-        if fpng.exists() or fpdf.exists():
-            st.markdown("### 📊 Vista Previa")
-            if fpng.exists(): 
-                st.image(str(fpng), width=700, caption=f"Vista Previa - {p_sel} - {d_sel}")
-            elif fpdf.exists(): 
-                st.info("📄 PDF generado (sin vista previa de imagen)")
-            
-            # Botón de descarga
-            tf = fpng if "PNG" in fmt_sel else fpdf
-            mm = "image/png" if "PNG" in fmt_sel else "application/pdf"
-            if tf.exists():
-                with open(tf,"rb") as f: 
-                    st.download_button(
-                        f"📥 Descargar {fmt_sel}", 
-                        f, 
-                        tf.name, 
-                        mm, 
-                        use_container_width=True, 
-                        key=f"dl_{p_sel}"
-                    )
+        p_num = p_sel.replace("Piso", "").strip() or "1"
+
+        # buscar archivo plano
+        file_candidates = [
+            PLANOS_DIR / f"piso{p_num}.png",
+            PLANOS_DIR / f"piso{p_num}.jpg",
+            PLANOS_DIR / f"Piso{p_num}.png",
+            PLANOS_DIR / f"Piso{p_num}.jpg",
+        ]
+        pim = next((p for p in file_candidates if p.exists()), None)
+
+        if not pim:
+            st.error(f"❌ No se encontró el plano para {p_sel}")
+            st.info("💡 Revisa que exista en /planos como piso1.png / piso1.jpg / Piso1.png")
         else:
-            st.info("ℹ️ Haz clic en '🎨 Generar Vista Previa' para crear el plano con los estilos configurados")
+            existing_zones = zonas.get(p_sel, []) or []
+
+            selected_team = st.session_state.get(f"team_{p_sel}", "")
+            selected_color = st.session_state.get(f"color_{p_sel}", "#00A04A") or "#00A04A"
+
+            st.success(f"✅ Plano cargado: {pim.name}")
+
+            if selected_team:
+                st.info(f"🎨 Equipo seleccionado: **{selected_team}** | Color: **{selected_color}**")
+            else:
+                st.warning("⚠️ Selecciona un equipo y color en el panel derecho antes de dibujar")
+
+            editor_result = zone_editor(
+                img_path=str(pim),
+                existing_zones=existing_zones,
+                selected_team=selected_team,
+                selected_color=selected_color,
+                width=640,
+                key=f"zone_editor_{p_sel}"
+            )
+
+            # Botones auxiliares
+            b1, b2 = st.columns(2)
+            if b1.button("🔄 Recargar Zonas", key=f"reload_{p_sel}"):
+                st.rerun()
+
+            if b2.button("🗑️ Limpiar Todas", key=f"clear_all_{p_sel}"):
+                zonas[p_sel] = []
+                if save_zones(zonas):
+                    st.success("✅ Todas las zonas eliminadas")
+                    st.rerun()
+                else:
+                    st.error("❌ Error al eliminar las zonas")
+
+            # ---- aceptar respuesta flexible del componente ----
+            zonas_component = None
+            action = "manual"
+
+            if editor_result:
+                if isinstance(editor_result, dict):
+                    zonas_component = editor_result.get("zones")
+                    action = editor_result.get("action", "manual")
+                elif isinstance(editor_result, list):
+                    zonas_component = editor_result
+                else:
+                    zonas_component = None
+
+            if isinstance(zonas_component, list):
+                zonas[p_sel] = zonas_component
+                if save_zones(zonas):
+                    st.success(f"✅ {len(zonas_component)} zonas guardadas.")
+                    if action == "manual":
+                        st.rerun()
+                else:
+                    st.error("❌ Error al guardar las zonas. Intenta nuevamente.")
+
+            st.info(
+                "💡 Instrucciones: 1) Selecciona equipo/color a la derecha. "
+                "2) Dibuja zonas. 3) Guarda desde el componente."
+            )
+
+    with col_right:
+        st.subheader("🎨 Configuración de Zonas")
+
+        # Día referencia
+        d_sel = st.selectbox("Día Ref.", ORDER_DIAS, key=f"dia_ref_{p_sel}")
+
+        current_seats_dict = {}
+        eqs = [""]
+
+        if not df_d.empty:
+            subset = df_d[(df_d["piso"] == p_sel) & (df_d["dia"] == d_sel)]
+            current_seats_dict = dict(zip(subset["equipo"], subset["cupos"]))
+            eqs += sorted(subset["equipo"].unique().tolist())
+
+        # salas por piso
+        if "1" in p_sel:
+            eqs += ["Sala Grande - Piso 1", "Sala Pequeña - Piso 1"]
+        elif "2" in p_sel:
+            eqs += ["Sala Reuniones - Piso 2"]
+        elif "3" in p_sel:
+            eqs += ["Sala Reuniones - Piso 3"]
+
+        tn = st.selectbox("Equipo / Sala", eqs, key=f"team_{p_sel}")
+        tc = st.color_picker("Color", "#00A04A", key=f"color_{p_sel}")
+
+        if tn and tn in current_seats_dict:
+            st.info(f"📊 Cupos: {current_seats_dict[tn]}")
+
+        st.markdown("---")
+
+        if zonas.get(p_sel):
+            st.success(f"✅ {len(zonas[p_sel])} zonas guardadas para {p_sel}")
+        else:
+            st.warning("ℹ️ No hay zonas guardadas para este piso aún.")
 
     with t3:
         st.subheader("Generar Reportes de Distribución")
@@ -2743,6 +2100,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
