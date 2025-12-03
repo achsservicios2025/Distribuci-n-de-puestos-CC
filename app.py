@@ -1907,7 +1907,7 @@ elif menu == "Administrador":
 
                     df_def = pd.DataFrame(deficit_data)
 
-                    cols_hide = [c for c in df_def.columns if str(c).strip().lower() in ("formula", "explicacion", "explicación")]
+                    cols_hide = [c for c in df_def.columns if str(c).strip().lower() in ("formula", "explicacion", "explicación", "causa")]
                     df_def = df_def.drop(columns=cols_hide, errors="ignore")
 
                     st.dataframe(df_def, hide_index=True, use_container_width=True)
@@ -2541,6 +2541,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
