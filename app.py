@@ -1918,21 +1918,43 @@ elif menu == "Administrador":
             with t_view:
                 df_preview = pd.DataFrame(st.session_state.get("proposal_rows", []))
 
-                if not df_preview.empty:
-                    df_sorted = apply_sorting_to_df(df_preview)
+                # Mapa Equipo -> Personas desde hoja "Equipos"
+                dot_map = _dot_map_from_equipos(df_eq_s)  # ya la tienes definida arriba
 
-                    # ✅ Mostrar SOLO estas columnas (y con estos nombres)
-                    df_show = df_sorted.rename(columns={
+                if not df_preview.empty:
+                    # normalizar columnas esperadas
+                    for c in ["piso", "dia", "equipo", "cupos"]:
+                        if c not in df_preview.columns:
+                            df_preview[c] = ""
+
+                    # ✅ NO mostrar/usar "Cupos libres" en el generador (tabla admin)
+                    df_preview = df_preview[df_preview["equipo"].astype(str).str.strip().str.lower() != "cupos libres"].copy()
+
+                    # ✅ % Uso diario = (Cupos / Personas) * 100
+                    def _pct_uso(row):
+                        equipo = str(row.get("equipo", "")).strip()
+                        cupos = row.get("cupos", 0)
+                        try:
+                            cupos = int(float(str(cupos).replace(",", ".")))
+                        except:
+                            cupos = 0
+                        personas = dot_map.get(equipo, 0)
+                        if personas and personas > 0:
+                            return round((cupos / personas) * 100, 2)
+                        return 0.0
+
+                    df_preview["% de Uso diario"] = df_preview.apply(_pct_uso, axis=1)
+
+                    # ✅ dejar SOLO estas columnas
+                    df_show = df_preview[["piso", "equipo", "dia", "cupos", "% de Uso diario"]].copy()
+                    df_show = df_show.rename(columns={
                         "piso": "Piso",
                         "equipo": "Equipo",
                         "dia": "Día",
-                        "cupos": "Cupos",
-                        "pct": "% de Uso diario",
+                        "cupos": "Cupos"
                     })
 
-                    wanted = ["Piso", "Equipo", "Día", "Cupos", "% de Uso diario"]
-                    df_show = df_show[[c for c in wanted if c in df_show.columns]]
-
+                    df_show = apply_sorting_to_df(df_show)
                     st.dataframe(df_show, hide_index=True, use_container_width=True)
                 else:
                     st.warning("No hay datos.")
@@ -2593,6 +2615,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
