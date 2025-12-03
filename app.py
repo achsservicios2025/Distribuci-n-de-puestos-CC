@@ -2187,17 +2187,6 @@ elif menu == "Administrador":
                     initial_drawing={"version": "4.4.0", "objects": init_objects},
                     key=st_canvas_key,
                 )
-                    fill_color=fill_rgba,
-                    stroke_width=2,
-                    stroke_color=selected_color,
-                    background_image=bg_img,          # ✅ se ve el plano
-                    update_streamlit=True,
-                    height=canvas_h,
-                    width=canvas_w,
-                    drawing_mode="rect",
-                    initial_drawing={"version": "4.4.0", "objects": init_objects},
-                    key=st_canvas_key,
-                )
 
                 # Guardar zonas
                 if st.button("💾 Guardar zonas", type="primary", key=f"save_zones_{p_sel}"):
@@ -2738,6 +2727,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
