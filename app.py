@@ -1978,225 +1978,281 @@ elif menu == "Administrador":
     with t2:
         st.subheader("Editor Visual de Zonas (Rectángulos sobre plano)")
 
-        # =========================
-        # DATA BASE
-        # =========================
-        zonas = load_zones() or {}
+        zonas_all = load_zones() or {}
 
+        # DF de distribución (para pisos/equipos/cupos)
         df_d = read_distribution_df(conn)
-        pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+        if df_d is None or df_d.empty or "piso" not in df_d.columns:
+            st.warning("⚠️ No hay distribución cargada aún. Sube y procesa un Excel primero.")
+            st.stop()
 
+        # -------------------------
+        # Helpers
+        # -------------------------
         def norm_piso(x):
             s = str(x).strip()
             if not s.lower().startswith("piso"):
                 s = f"Piso {s}"
             return s
 
-        pisos_list_clean = [norm_piso(p) for p in pisos_list if p is not None and str(p).strip() != ""]
-        if not pisos_list_clean:
-            pisos_list_clean = ["Piso 1"]
+        def sort_floors_like(pisos):
+            # intenta ordenar por número al final ("Piso 10" > "Piso 2")
+            def keyfn(p):
+                p = norm_piso(p)
+                num = "".join(ch for ch in p if ch.isdigit())
+                return (int(num) if num else 9999, p)
+            return sorted([norm_piso(p) for p in pisos], key=keyfn)
+
+        def find_plan_path(p_sel: str):
+            p_sel = norm_piso(p_sel)
+            p_num = p_sel.replace("Piso", "").strip() or "1"
+            candidates = [
+                PLANOS_DIR / f"piso{p_num}.png",
+                PLANOS_DIR / f"piso{p_num}.jpg",
+                PLANOS_DIR / f"Piso{p_num}.png",
+                PLANOS_DIR / f"Piso{p_num}.jpg",
+                PLANOS_DIR / f"piso_{p_num}.png",
+                PLANOS_DIR / f"piso_{p_num}.jpg",
+            ]
+            return next((p for p in candidates if p.exists()), None)
+
+        def cupos_equipo_dia(df, piso, equipo, dia):
+            if df is None or df.empty:
+                return 0
+            cols = {c.lower(): c for c in df.columns}
+            # esperamos al menos: piso/equipo/dia/cupos (tu app ya lo maneja así)
+            pcol = cols.get("piso", "piso")
+            ecol = cols.get("equipo", "equipo")
+            dcol = cols.get("dia", "dia")
+            ccol = cols.get("cupos", "cupos")
+            try:
+                sub = df[(df[pcol].astype(str) == str(piso)) &
+                        (df[ecol].astype(str) == str(equipo)) &
+                        (df[dcol].astype(str) == str(dia))]
+                if ccol not in sub.columns:
+                    return 0
+                val = sub[ccol].sum()
+                return int(val) if pd.notna(val) else 0
+            except Exception:
+                return 0
+
+        # -------------------------
+        # Preparar listas UI
+        # -------------------------
+        pisos_list = sort_floors_like(df_d["piso"].dropna().unique().tolist())
+        pisos_list = [p for p in pisos_list if p.strip() != ""]
+        if not pisos_list:
+            pisos_list = ["Piso 1"]
+
+        # estado UI
+        if "zones_piso" not in st.session_state:
+            st.session_state["zones_piso"] = pisos_list[0]
+        if "zones_dia" not in st.session_state:
+            st.session_state["zones_dia"] = "Lunes"
+        if "zones_equipo" not in st.session_state:
+            st.session_state["zones_equipo"] = ""
+        if "zones_color" not in st.session_state:
+            st.session_state["zones_color"] = "#00A04A"
+        if "zones_palette_open" not in st.session_state:
+            st.session_state["zones_palette_open"] = True
+
+        # -------------------------
+        # Layout (canvas izq / config der)
+        # -------------------------
+        col_left, col_right = st.columns([2.4, 1])
 
         # =========================
-        # UI: selector piso y plano
-        # =========================
-        p_sel = st.selectbox("Piso", pisos_list_clean, key="zones_piso_select")
-        p_sel = norm_piso(p_sel)
-        p_num = p_sel.replace("Piso", "").strip() or "1"
-
-        # buscar archivo plano (png/jpg)
-        file_candidates = [
-            PLANOS_DIR / f"piso{p_num}.png",
-            PLANOS_DIR / f"piso{p_num}.jpg",
-            PLANOS_DIR / f"Piso{p_num}.png",
-            PLANOS_DIR / f"Piso{p_num}.jpg",
-            PLANOS_DIR / f"piso_{p_num}.png",
-            PLANOS_DIR / f"piso_{p_num}.jpg",
-        ]
-        plano_path = next((p for p in file_candidates if p.exists()), None)
-
-        if not plano_path:
-            st.error(f"❌ No se encontró el plano para {p_sel}")
-            st.info("💡 Debe existir en /planos como piso1.png / piso1.jpg / Piso1.png / Piso1.jpg")
-            st.stop()
-
-        # =========================
-        # Layout
-        # =========================
-        col_left, col_right = st.columns([2.2, 1])
-
-        # =========================
-        # Panel derecho (config)
+        # Panel derecho (Piso -> Día -> Equipo -> Cupos)
         # =========================
         with col_right:
             st.markdown("### 🎨 Configuración")
 
-            # lista equipos desde distribución (sin Cupos libres)
+            # Piso (a la derecha, arriba)
+            p_sel = st.selectbox(
+                "Piso",
+                pisos_list,
+                index=max(0, pisos_list.index(st.session_state["zones_piso"])) if st.session_state["zones_piso"] in pisos_list else 0,
+                key="zones_piso_select_right",
+            )
+            p_sel = norm_piso(p_sel)
+            st.session_state["zones_piso"] = p_sel
+
+            # Día (Lunes..Viernes)
+            dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+            dia_sel = st.selectbox(
+                "Día",
+                dias,
+                index=dias.index(st.session_state["zones_dia"]) if st.session_state["zones_dia"] in dias else 0,
+                key="zones_dia_select_right",
+            )
+            st.session_state["zones_dia"] = dia_sel
+
+            # Equipos del piso (sin "Cupos libres")
             equipos = []
-            if not df_d.empty:
-                equipos = sorted(
-                    [
-                        e for e in df_d[df_d["piso"] == p_sel]["equipo"].unique().tolist()
-                        if str(e).strip().lower() != "cupos libres"
-                      ]
-                )
+            try:
+                sub_p = df_d[df_d["piso"].astype(str) == str(p_sel)]
+                equipos = sorted([
+                    str(e) for e in sub_p["equipo"].dropna().unique().tolist()
+                    if str(e).strip().lower() != "cupos libres"
+                ])
+            except Exception:
+                equipos = []
 
             if not equipos:
                 equipos = ["(sin equipos cargados)"]
 
-            # selector día (L-V) bajo piso y sobre equipo
-            dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
-            dia_sel = st.selectbox("Día", dias_semana, key=f"zones_day_{p_sel}")
+            # asegurar selección válida
+            if st.session_state["zones_equipo"] not in equipos:
+                st.session_state["zones_equipo"] = equipos[0]
 
-            equipo_sel = st.selectbox("Equipo", equipos, key=f"zones_team_{p_sel}")
+            equipo_sel = st.selectbox(
+                "Equipo",
+                equipos,
+                index=equipos.index(st.session_state["zones_equipo"]) if st.session_state["zones_equipo"] in equipos else 0,
+                key="zones_team_select_right",
+            )
+            st.session_state["zones_equipo"] = equipo_sel
 
-            # Mensaje cupos del equipo ese día (según df_d)
-            cupos_equipo_dia = None
-            try:
-                if not df_d.empty and equipo_sel and equipo_sel != "(sin equipos cargados)":
-                    _tmp = df_d[
-                        (df_d["piso"] == p_sel)
-                        & (df_d["equipo"] == equipo_sel)
-                        & (df_d["dia"] == dia_sel)
-                    ]
-                    if not _tmp.empty:
-                        # intenta columna 'cupos' o 'asignado' (según tu DF)
-                        if "cupos" in _tmp.columns:
-                            cupos_equipo_dia = int(_tmp["cupos"].iloc[0])
-                        elif "asignado" in _tmp.columns:
-                            cupos_equipo_dia = int(_tmp["asignado"].iloc[0])
-            except Exception:
-                cupos_equipo_dia = None
+            # Mensaje cupos asignados (se recalcula al cambiar piso/día/equipo)
+            cupos_val = cupos_equipo_dia(df_d, p_sel, equipo_sel, dia_sel)
+            st.success(f"📌 Cupos asignados para **{equipo_sel}** el **{dia_sel}**: **{cupos_val}**")
 
-            if cupos_equipo_dia is None:
-                st.info(f"📌 Cupos asignados para **{equipo_sel}** el **{dia_sel}**: (no disponible)")
-            else:
-                st.success(f"📌 Cupos asignados para **{equipo_sel}** el **{dia_sel}**: **{cupos_equipo_dia}**")
+            # Botón mostrar/ocultar paleta
+            if st.button("🎨 Mostrar/Ocultar paleta", key="toggle_palette_btn"):
+                st.session_state["zones_palette_open"] = not st.session_state["zones_palette_open"]
 
-            # Color actual por piso (estado)
-            if f"zones_color_{p_sel}" not in st.session_state:
-                st.session_state[f"zones_color_{p_sel}"] = "#00A04A"
-
-            # Botón para mostrar paleta (cuadritos)
-            if f"zones_show_palette_{p_sel}" not in st.session_state:
-                st.session_state[f"zones_show_palette_{p_sel}"] = False
-
-            if st.button("🎨 Mostrar/Ocultar paleta", key=f"btn_palette_{p_sel}"):
-                st.session_state[f"zones_show_palette_{p_sel}"] = not st.session_state[f"zones_show_palette_{p_sel}"]
-
-            if st.session_state[f"zones_show_palette_{p_sel}"]:
+            # Paleta (tipo Paint) + hex input
+            if st.session_state["zones_palette_open"]:
                 st.caption("Paleta rápida (tipo Paint)")
 
                 PALETTE = [
-                    "#000000", "#202020", "#404040", "#808080", "#C0C0C0", "#FFFFFF",
-                    "#7F0000", "#FF0000", "#FF6A00", "#FFA500", "#FFD700", "#FFFF00",
-                    "#006400", "#00A04A", "#00FF00", "#00FFFF", "#1E90FF", "#0000FF",
-                    "#4B0082", "#8000FF", "#8A2BE2", "#FF00FF", "#C71585", "#DC143C",
-                    "#8B4513", "#A0522D", "#D2B48C", "#2F4F4F", "#008080", "#4682B4",
+                    "#000000", "#1C1C1C", "#404040", "#808080", "#C0C0C0", "#FFFFFF",
+                    "#8B0000", "#FF0000", "#FF4500", "#FFA500", "#FFD700", "#FFFF00",
+                    "#006400", "#00A04A", "#00FF00", "#00FA9A", "#00FFFF", "#00BFFF",
+                    "#00008B", "#0000FF", "#1E90FF", "#4169E1", "#8000FF", "#8A2BE2",
+                    "#FF00FF", "#FF1493", "#DC143C", "#A0522D", "#8B4513", "#2F4F4F",
                 ]
 
-                cols = st.columns(6)
+                # grid de botones color (cuadritos)
+                grid_cols = st.columns(6)
                 for i, hx in enumerate(PALETTE):
-                    with cols[i % 6]:
-                        if st.button(" ", key=f"pal_{p_sel}_{hx}", help=hx):
-                            st.session_state[f"zones_color_{p_sel}"] = hx
+                    with grid_cols[i % 6]:
+                        # botón con relleno via CSS (key único)
+                        if st.button(" ", key=f"pal_btn_{hx}", help=hx):
+                            st.session_state["zones_color"] = hx
+                            st.rerun()
+
                         st.markdown(
                             f"""
                             <div style="
                                 width: 28px; height: 28px; border-radius: 6px;
                                 border: 1px solid #999; background:{hx};
-                                margin-top: -28px; margin-bottom: 8px;
+                                margin-top: -28px; margin-bottom: 10px;
                             "></div>
                             """,
                             unsafe_allow_html=True
                         )
 
-            # input hex manual
-            custom_hex = st.text_input(
-                "Color (hex)",
-                value=st.session_state[f"zones_color_{p_sel}"],
-                key=f"hex_{p_sel}"
-            )
-            custom_hex = (custom_hex or "").strip()
-            if custom_hex and not custom_hex.startswith("#"):
-                custom_hex = "#" + custom_hex
-            if re.match(r"^#[0-9a-fA-F]{6}$", custom_hex):
-                st.session_state[f"zones_color_{p_sel}"] = custom_hex
+                custom_hex = st.text_input("Color (hex)", value=st.session_state["zones_color"], key="zones_hex_input")
+                custom_hex = custom_hex.strip()
+                if custom_hex and not custom_hex.startswith("#"):
+                    custom_hex = "#" + custom_hex
+                if re.match(r"^#[0-9a-fA-F]{6}$", custom_hex):
+                    st.session_state["zones_color"] = custom_hex
 
-            color_sel = st.session_state[f"zones_color_{p_sel}"]
-            st.write(f"Color actual: `{color_sel}`")
+            st.write(f"Color actual: `{st.session_state['zones_color']}`")
 
             st.markdown("---")
             st.markdown("### 💾 Acciones")
 
-            if st.button("🗑️ Borrar zonas de este piso", type="secondary", key=f"clear_zones_{p_sel}"):
-                zonas[p_sel] = []
-                save_zones(zonas)
+            if st.button("🗑️ Borrar zonas de este piso", type="primary", key="clear_zones_floor_btn"):
+                zonas_all[p_sel] = []
+                save_zones(zonas_all)
                 st.success("Zonas eliminadas")
                 st.rerun()
 
-            st.caption("Tip: dibuja rectángulos sobre el plano y aprieta **Guardar zonas** debajo del canvas.")
+            st.caption("Tip: dibuja rectángulos sobre el plano y aprieta **Guardar zonas** abajo del canvas.")
 
         # =========================
-        # Canvas sobre la imagen
+        # Panel izquierdo (canvas centrado + imagen visible)
         # =========================
         with col_left:
             st.subheader("🗺️ Plano (edición)")
+
+            p_sel = st.session_state["zones_piso"]
+            dia_sel = st.session_state["zones_dia"]
+            equipo_sel = st.session_state["zones_equipo"]
+            selected_color = st.session_state["zones_color"]
+
+            plano_path = find_plan_path(p_sel)
+            if not plano_path:
+                st.error(f"❌ No se encontró el plano para {p_sel}")
+                st.info("💡 Debe existir en /planos como piso1.png / piso1.jpg / Piso1.png / Piso1.jpg")
+                st.stop()
+
             st.caption(f"🖼️ Plano: {plano_path.name}")
 
-            # Cargar imagen PNG/JPG
-            pil_img = PILImage.open(plano_path).convert("RGB")
+            # cargar PNG/JPG como PIL
+            pil_img = PILImage.open(plano_path).convert("RGBA")
             img_w, img_h = pil_img.size
 
-            # Doble tamaño (sin duplicar después)
-            scale = 2.0
+            target_w = 1280
+            scale = min(target_w / img_w, 2.0)  # no más de 2x real
             canvas_w = int(img_w * scale)
             canvas_h = int(img_h * scale)
 
+            # fondo a tamaño canvas
             bg_img = pil_img.resize((canvas_w, canvas_h))
 
-            # Zonas existentes del piso
-            existing_zones = (zonas.get(p_sel, []) or [])
+            # zonas existentes
+            zonas_all = load_zones() or {}
+            existing_zones = zonas_all.get(p_sel, []) or []
 
-            # Preparar objetos iniciales (re-escalando según scale)
+            # objetos iniciales en canvas (re-escalados)
             init_objects = []
             for z in existing_zones:
                 try:
-                    z_color = z.get("color", "#00A04A")
                     init_objects.append({
                         "type": "rect",
                         "left": float(z.get("left", 0)) * scale,
                         "top": float(z.get("top", 0)) * scale,
                         "width": float(z.get("width", 0)) * scale,
                         "height": float(z.get("height", 0)) * scale,
-                        "fill": z.get("fill", hex_to_rgba(z_color, 0.30)),
-                        "stroke": z.get("stroke", z_color),
+                        "fill": z.get("fill", hex_to_rgba(z.get("color", "#00A04A"), 0.30)),
+                        "stroke": z.get("stroke", z.get("color", "#00A04A")),
                         "strokeWidth": z.get("strokeWidth", 2),
                     })
                 except Exception:
                     continue
 
-            # Color/equipo/día desde panel derecho
-            selected_team = equipo_sel
-            selected_day = dia_sel
-            selected_color = st.session_state.get(f"zones_color_{p_sel}", "#00A04A") or "#00A04A"
+            # colores actuales
             fill_rgba = hex_to_rgba(selected_color, 0.30)
 
             st_canvas_key = f"canvas_{p_sel}"
 
-            canvas_result = st_canvas(
-                fill_color=fill_rgba,
-                stroke_width=2,
-                stroke_color=selected_color,
-                background_image=bg_img,  # PIL.Image OK
-                update_streamlit=True,
-                height=canvas_h,
-                width=canvas_w,
-                drawing_mode="rect",
-                initial_drawing={"version": "4.4.0", "objects": init_objects},
-                key=st_canvas_key,
-            )
+            # ✅ centrar canvas con columnas espaciadoras
+            max_w = 1400
+            use_w = min(canvas_w, max_w)
+            use_h = int(canvas_h * (use_w / canvas_w))
 
-            # Guardar zonas
+            bg_to_use = bg_img.resize((use_w, use_h)) if use_w != canvas_w else bg_img
+
+            left_pad, mid, right_pad = st.columns([2, 8, 2])
+            with mid:
+                canvas_result = st_canvas(
+                    fill_color=fill_rgba,
+                    stroke_width=2,
+                    stroke_color=selected_color,
+                    background_image=bg_to_use,  # PIL Image (PNG/JPG) ✅
+                    update_streamlit=True,
+                    height=use_h,
+                    width=use_w,
+                    drawing_mode="rect",
+                    initial_drawing={"version": "4.4.0", "objects": init_objects},
+                    key=st_canvas_key,
+                )
+
+            # Guardar zonas (desescalando a coords originales)
             if st.button("💾 Guardar zonas", type="primary", key=f"save_zones_{p_sel}"):
 
                 def _unscale(v):
@@ -2211,11 +2267,10 @@ elif menu == "Administrador":
                     for o in objs:
                         if o.get("type") != "rect":
                             continue
-
                         new_zones.append({
                             "type": "rect",
-                            "team": selected_team,
-                            "day": selected_day,
+                            "team": equipo_sel,
+                            "day": dia_sel,
                             "color": selected_color,
                             "left": _unscale(o.get("left", 0)),
                             "top": _unscale(o.get("top", 0)),
@@ -2226,12 +2281,269 @@ elif menu == "Administrador":
                             "strokeWidth": o.get("strokeWidth", 2),
                         })
 
-                zonas[p_sel] = new_zones
-                if save_zones(zonas):
+                zonas_all[p_sel] = new_zones
+                if save_zones(zonas_all):
                     st.success(f"✅ Guardadas {len(new_zones)} zonas en {p_sel}")
                     st.rerun()
                 else:
-                    st.error("❌ No se pudieron guardar las zonas")    
+                    st.error("❌ No se pudieron guardar las zonas")
+    
+            st.subheader("Editor Visual de Zonas (Rectángulos sobre plano)")
+
+            # =========================
+            # DATA BASE
+            # =========================
+            zonas = load_zones() or {}
+
+            df_d = read_distribution_df(conn)
+            pisos_list = sort_floors(df_d["piso"].unique()) if not df_d.empty else ["Piso 1"]
+
+            def norm_piso(x):
+                s = str(x).strip()
+                if not s.lower().startswith("piso"):
+                    s = f"Piso {s}"
+                return s
+
+            pisos_list_clean = [norm_piso(p) for p in pisos_list if p is not None and str(p).strip() != ""]
+            if not pisos_list_clean:
+                pisos_list_clean = ["Piso 1"]
+
+            # =========================
+            # UI: selector piso y plano
+            # =========================
+            p_sel = st.selectbox("Piso", pisos_list_clean, key="zones_piso_select")
+            p_sel = norm_piso(p_sel)
+            p_num = p_sel.replace("Piso", "").strip() or "1"
+
+            # buscar archivo plano (png/jpg)
+            file_candidates = [
+                PLANOS_DIR / f"piso{p_num}.png",
+                PLANOS_DIR / f"piso{p_num}.jpg",
+                PLANOS_DIR / f"Piso{p_num}.png",
+                PLANOS_DIR / f"Piso{p_num}.jpg",
+                PLANOS_DIR / f"piso_{p_num}.png",
+                PLANOS_DIR / f"piso_{p_num}.jpg",
+            ]
+            plano_path = next((p for p in file_candidates if p.exists()), None)
+
+            if not plano_path:
+                st.error(f"❌ No se encontró el plano para {p_sel}")
+                st.info("💡 Debe existir en /planos como piso1.png / piso1.jpg / Piso1.png / Piso1.jpg")
+                st.stop()
+
+            # =========================
+            # Layout
+            # =========================
+            col_left, col_right = st.columns([2.2, 1])
+
+            # =========================
+            # Panel derecho (config)
+            # =========================
+            with col_right:
+                st.markdown("### 🎨 Configuración")
+
+                # lista equipos desde distribución (sin Cupos libres)
+                equipos = []
+                if not df_d.empty:
+                    equipos = sorted(
+                        [
+                            e for e in df_d[df_d["piso"] == p_sel]["equipo"].unique().tolist()
+                            if str(e).strip().lower() != "cupos libres"
+                          ]
+                    )
+
+                if not equipos:
+                    equipos = ["(sin equipos cargados)"]
+
+                # selector día (L-V) bajo piso y sobre equipo
+                dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+                dia_sel = st.selectbox("Día", dias_semana, key=f"zones_day_{p_sel}")
+
+                equipo_sel = st.selectbox("Equipo", equipos, key=f"zones_team_{p_sel}")
+
+                # Mensaje cupos del equipo ese día (según df_d)
+                cupos_equipo_dia = None
+                try:
+                    if not df_d.empty and equipo_sel and equipo_sel != "(sin equipos cargados)":
+                        _tmp = df_d[
+                            (df_d["piso"] == p_sel)
+                            & (df_d["equipo"] == equipo_sel)
+                            & (df_d["dia"] == dia_sel)
+                        ]
+                        if not _tmp.empty:
+                            # intenta columna 'cupos' o 'asignado' (según tu DF)
+                            if "cupos" in _tmp.columns:
+                                cupos_equipo_dia = int(_tmp["cupos"].iloc[0])
+                            elif "asignado" in _tmp.columns:
+                                cupos_equipo_dia = int(_tmp["asignado"].iloc[0])
+                except Exception:
+                    cupos_equipo_dia = None
+
+                if cupos_equipo_dia is None:
+                    st.info(f"📌 Cupos asignados para **{equipo_sel}** el **{dia_sel}**: (no disponible)")
+                else:
+                    st.success(f"📌 Cupos asignados para **{equipo_sel}** el **{dia_sel}**: **{cupos_equipo_dia}**")
+
+                # Color actual por piso (estado)
+                if f"zones_color_{p_sel}" not in st.session_state:
+                    st.session_state[f"zones_color_{p_sel}"] = "#00A04A"
+
+                # Botón para mostrar paleta (cuadritos)
+                if f"zones_show_palette_{p_sel}" not in st.session_state:
+                    st.session_state[f"zones_show_palette_{p_sel}"] = False
+
+                if st.button("🎨 Mostrar/Ocultar paleta", key=f"btn_palette_{p_sel}"):
+                    st.session_state[f"zones_show_palette_{p_sel}"] = not st.session_state[f"zones_show_palette_{p_sel}"]
+
+                if st.session_state[f"zones_show_palette_{p_sel}"]:
+                    st.caption("Paleta rápida (tipo Paint)")
+
+                    PALETTE = [
+                        "#000000", "#202020", "#404040", "#808080", "#C0C0C0", "#FFFFFF",
+                        "#7F0000", "#FF0000", "#FF6A00", "#FFA500", "#FFD700", "#FFFF00",
+                        "#006400", "#00A04A", "#00FF00", "#00FFFF", "#1E90FF", "#0000FF",
+                        "#4B0082", "#8000FF", "#8A2BE2", "#FF00FF", "#C71585", "#DC143C",
+                        "#8B4513", "#A0522D", "#D2B48C", "#2F4F4F", "#008080", "#4682B4",
+                    ]
+
+                    cols = st.columns(6)
+                    for i, hx in enumerate(PALETTE):
+                        with cols[i % 6]:
+                            if st.button(" ", key=f"pal_{p_sel}_{hx}", help=hx):
+                                st.session_state[f"zones_color_{p_sel}"] = hx
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    width: 28px; height: 28px; border-radius: 6px;
+                                    border: 1px solid #999; background:{hx};
+                                    margin-top: -28px; margin-bottom: 8px;
+                                "></div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                # input hex manual
+                custom_hex = st.text_input(
+                    "Color (hex)",
+                    value=st.session_state[f"zones_color_{p_sel}"],
+                    key=f"hex_{p_sel}"
+                )
+                custom_hex = (custom_hex or "").strip()
+                if custom_hex and not custom_hex.startswith("#"):
+                    custom_hex = "#" + custom_hex
+                if re.match(r"^#[0-9a-fA-F]{6}$", custom_hex):
+                    st.session_state[f"zones_color_{p_sel}"] = custom_hex
+
+                color_sel = st.session_state[f"zones_color_{p_sel}"]
+                st.write(f"Color actual: `{color_sel}`")
+
+                st.markdown("---")
+                st.markdown("### 💾 Acciones")
+
+                if st.button("🗑️ Borrar zonas de este piso", type="secondary", key=f"clear_zones_{p_sel}"):
+                    zonas[p_sel] = []
+                    save_zones(zonas)
+                    st.success("Zonas eliminadas")
+                    st.rerun()
+
+                st.caption("Tip: dibuja rectángulos sobre el plano y aprieta **Guardar zonas** debajo del canvas.")
+
+            # =========================
+            # Canvas sobre la imagen
+            # =========================
+            with col_left:
+                st.subheader("🗺️ Plano (edición)")
+                st.caption(f"🖼️ Plano: {plano_path.name}")
+
+                # Cargar imagen PNG/JPG
+                pil_img = PILImage.open(plano_path).convert("RGB")
+                img_w, img_h = pil_img.size
+
+                # Doble tamaño (sin duplicar después)
+                scale = 2.0
+                canvas_w = int(img_w * scale)
+                canvas_h = int(img_h * scale)
+
+                bg_img = pil_img.resize((canvas_w, canvas_h))
+
+                # Zonas existentes del piso
+                existing_zones = (zonas.get(p_sel, []) or [])
+
+                # Preparar objetos iniciales (re-escalando según scale)
+                init_objects = []
+                for z in existing_zones:
+                    try:
+                        z_color = z.get("color", "#00A04A")
+                        init_objects.append({
+                            "type": "rect",
+                            "left": float(z.get("left", 0)) * scale,
+                            "top": float(z.get("top", 0)) * scale,
+                            "width": float(z.get("width", 0)) * scale,
+                            "height": float(z.get("height", 0)) * scale,
+                            "fill": z.get("fill", hex_to_rgba(z_color, 0.30)),
+                            "stroke": z.get("stroke", z_color),
+                            "strokeWidth": z.get("strokeWidth", 2),
+                        })
+                    except Exception:
+                        continue
+
+                # Color/equipo/día desde panel derecho
+                selected_team = equipo_sel
+                selected_day = dia_sel
+                selected_color = st.session_state.get(f"zones_color_{p_sel}", "#00A04A") or "#00A04A"
+                fill_rgba = hex_to_rgba(selected_color, 0.30)
+
+                st_canvas_key = f"canvas_{p_sel}"
+
+                canvas_result = st_canvas(
+                    fill_color=fill_rgba,
+                    stroke_width=2,
+                    stroke_color=selected_color,
+                    background_image=bg_img,  # PIL.Image OK
+                    update_streamlit=True,
+                    height=canvas_h,
+                    width=canvas_w,
+                    drawing_mode="rect",
+                    initial_drawing={"version": "4.4.0", "objects": init_objects},
+                    key=st_canvas_key,
+                )
+
+                # Guardar zonas
+                if st.button("💾 Guardar zonas", type="primary", key=f"save_zones_{p_sel}"):
+
+                    def _unscale(v):
+                        try:
+                            return float(v) / float(scale) if scale and scale > 0 else float(v)
+                        except Exception:
+                            return 0.0
+
+                    new_zones = []
+                    if canvas_result and canvas_result.json_data:
+                        objs = canvas_result.json_data.get("objects", []) or []
+                        for o in objs:
+                            if o.get("type") != "rect":
+                                continue
+
+                            new_zones.append({
+                                "type": "rect",
+                                "team": selected_team,
+                                "day": selected_day,
+                                "color": selected_color,
+                                "left": _unscale(o.get("left", 0)),
+                                "top": _unscale(o.get("top", 0)),
+                                "width": _unscale(o.get("width", 0)),
+                                "height": _unscale(o.get("height", 0)),
+                                "fill": o.get("fill", fill_rgba),
+                                "stroke": o.get("stroke", selected_color),
+                                "strokeWidth": o.get("strokeWidth", 2),
+                            })
+
+                    zonas[p_sel] = new_zones
+                    if save_zones(zonas):
+                        st.success(f"✅ Guardadas {len(new_zones)} zonas en {p_sel}")
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudieron guardar las zonas")    
 
     with t3:
         st.subheader("Descargas")
@@ -2736,6 +3048,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
