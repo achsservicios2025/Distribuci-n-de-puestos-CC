@@ -351,15 +351,9 @@ def _dot_map_from_equipos(df_eq: pd.DataFrame) -> dict:
     return out
 
 def _cap_map_from_capacidades(df_cap: pd.DataFrame) -> dict:
-    """
-    Espera una hoja Capacidades con algo como:
-    piso | dia | capacidad
-    Si no hay 'dia', asumimos capacidad diaria igual para todos los días.
-    """
     if df_cap is None or df_cap.empty:
         return {}
 
-    # intentar detectar columnas
     col_piso = next((c for c in df_cap.columns if "piso" in c.lower()), None)
     col_dia = next((c for c in df_cap.columns if "dia" in c.lower() or "día" in c.lower()), None)
     col_cap = next((c for c in df_cap.columns if "cap" in c.lower() or "cupo" in c.lower()), None)
@@ -368,21 +362,26 @@ def _cap_map_from_capacidades(df_cap: pd.DataFrame) -> dict:
         return {}
 
     out = {}
-        for _, r in df_cap.iterrows():
-            piso_raw = str(r.get(col_piso, "")).strip()
-            if not piso_raw or piso_raw.lower() == "nan":
-                continue
-            piso = piso_raw if piso_raw.lower().startswith("piso") else f"Piso {piso_raw}"
+    for _, r in df_cap.iterrows():
+        piso_raw = str(r.get(col_piso, "")).strip()
+        if not piso_raw or piso_raw.lower() == "nan":
+            continue
+        piso = piso_raw if piso_raw.lower().startswith("piso") else f"Piso {piso_raw}"
 
-            dia = str(r.get(col_dia, "")).strip() if col_dia else ""
-            if dia.lower() == "nan":
-                dia = ""
+        dia = str(r.get(col_dia, "")).strip() if col_dia else ""
+        if dia.lower() == "nan":
+            dia = ""
+
+        try:
+            cap = int(float(str(r.get(col_cap, 0)).replace(",", ".")))
         except Exception:
             continue
+
         if cap <= 0:
             continue
-        # clave por (piso,dia) o (piso,"")
+
         out[(piso, dia)] = cap
+
     return out
 
 def _min_daily_for_team(dotacion: int, factor: float = 1.0) -> int:
@@ -2305,6 +2304,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
