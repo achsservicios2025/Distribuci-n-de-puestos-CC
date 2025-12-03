@@ -1904,9 +1904,16 @@ elif menu == "Administrador":
                 deficit_data = st.session_state.get("proposal_deficit", [])
                 if deficit_data:
                     st.error(f"⚠️ {len(deficit_data)} conflictos detectados.")
-                    st.dataframe(pd.DataFrame(deficit_data), hide_index=True, use_container_width=True)
+
+                    df_def = pd.DataFrame(deficit_data)
+
+                    cols_hide = [c for c in df_def.columns if str(c).strip().lower() in ("formula", "explicacion", "explicación")]
+                    df_def = df_def.drop(columns=cols_hide, errors="ignore")
+
+                    st.dataframe(df_def, hide_index=True, use_container_width=True)
                 else:
                     st.success("✅ Distribución perfecta.")
+
         else:
             st.info("Sube y procesa un Excel para generar una propuesta.")
 
@@ -2534,6 +2541,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
