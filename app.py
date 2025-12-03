@@ -2047,28 +2047,7 @@ elif menu == "Administrador":
                 st.warning("ℹ️ No hay zonas guardadas para este piso aún.")
 
     with t3:
-        st.subheader("Generar Reportes de Distribución")
-        
-        raw_deficits = st.session_state.get('deficit_report') or st.session_state.get('proposal_deficit') or []
-        deficits_ui = filter_minimum_deficits(raw_deficits)
-        if deficits_ui:
-            st.markdown("---")
-            st.error("🚨 INFORME DE DÉFICIT DE CUPOS")
-            
-            df_deficit = pd.DataFrame(deficits_ui)
-            df_deficit = df_deficit.rename(columns={
-                'piso': 'Piso', 
-                'dia': 'Día', 
-                'equipo': 'Equipo', 
-                'deficit': 'Cupos Faltantes',
-                'causa': 'Observación'
-            })
-            st.dataframe(df_deficit, hide_index=True, width=None, use_container_width=True)
-            st.markdown("---")
-        else:
-            st.markdown("---")
-            st.success("✅ Sin déficits detectados: todos los equipos alcanzan su mínimo requerido.")
-            st.markdown("---")
+        st.subheader("Descargas")
 
         # Separar informes de cupos y salas
         st.markdown("### 📊 Informes de Distribución")
@@ -2555,6 +2534,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
