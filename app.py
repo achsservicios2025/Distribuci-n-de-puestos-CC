@@ -271,7 +271,6 @@ def _equity_score(rows, deficit, dot_map: dict, days_per_week=5):
     # Pesos: std manda, luego rango, luego conflictos
     return (1.0 * std) + (0.6 * rng) + (0.2 * conflicts)
 
-
 def generate_balanced_distribution(
     df_eq: pd.DataFrame,
     df_pa: pd.DataFrame,
@@ -767,270 +766,348 @@ def create_merged_pdf(piso_sel, conn, global_logo_path):
 
 def generate_full_pdf(
     distrib_df: pd.DataFrame,
-    df_equipos: Optional[pd.DataFrame] = None,
+    semanal_df: pd.DataFrame,
     out_path: str = "reporte.pdf",
     logo_path: Path = Path("static/logo.png"),
     deficit_data=None
 ):
     """
-    Genera el reporte PDF de distribución.
-
-    - Página 1: Distribución diaria (filas tal cual distrib_df: piso/equipo/dia/cupos/pct)
-    - Página 2: Resumen semanal por equipo (Total semanal, Promedio diario, Dotación real, % Uso)
-    - Página 3 (opcional): Reporte de déficits (si deficit_data viene con datos)
-    - Glosario completo al final
-
-    IMPORTANTE:
-    - Para que % Uso sea correcto, pásale df_equipos (hoja "Equipos") desde sesión.
+    PDF = INFORME (no motor de cálculo).
+    - Usa los mismos valores que ves en la app (ideal: lo que viene de BD).
+    - %Distrib diario:
+        * si viene en la data, se usa
+        * si no viene o viene vacío, se recalcula SOLO desde los cupos del mismo piso/día
+          para que la suma por piso/día sea 100% (incluyendo Cupos libres)
+    - Incluye Reporte de Déficit si existe.
+    - Glosario reducido (sin los 2 puntos que pediste quitar).
     """
-
-    def _safe_str(x, default=""):
-        if x is None:
-            return default
-        try:
-            if isinstance(x, float) and pd.isna(x):
-                return default
-        except Exception:
-            pass
-        return str(x)
-
-    def _find_col(df: pd.DataFrame, candidates_lower):
-        if df is None or df.empty:
-            return None
-        cols = list(df.columns)
-        for c in cols:
-            cl = str(c).lower().strip()
-            for cand in candidates_lower:
-                if cand in cl:
-                    return c
-        return None
-
     pdf = FPDF()
     pdf.set_auto_page_break(True, 15)
 
-    # --- 1) Preparación DF para impresión ---
+    # -------------------------
+    # Helpers
+    # -------------------------
+    def _clean_text(x):
+        return clean_pdf_text(str(x) if x is not None else "")
+
+    def _find_col(df, candidates):
+        if df is None or df.empty:
+            return None
+        lower_map = {str(c).strip().lower(): c for c in df.columns}
+        for cand in candidates:
+            key = cand.strip().lower()
+            if key in lower_map:
+                return lower_map[key]
+        # fallback: contains
+        for cand in candidates:
+            key = cand.strip().lower()
+            hit = next((orig for low, orig in lower_map.items() if key in low), None)
+            if hit:
+                return hit
+        return None
+
+    def _to_num(x, default=0.0):
+        try:
+            s = str(x).replace("%", "").strip().replace(",", ".")
+            if s.lower() in ["nan", "none", ""]:
+                return default
+            return float(s)
+        except Exception:
+            return default
+
+    def _norm_piso(x):
+        s = str(x).strip()
+        if s.lower() in ["nan", "none", ""]:
+            return "-"
+        # si viene "2" => "Piso 2"
+        if not s.lower().startswith("piso"):
+            s = f"Piso {s}"
+        return s
+
+    def _pct_fmt(v):
+        try:
+            return f"{float(v):.1f}%"
+        except Exception:
+            return "-"
+
+    # -------------------------
+    # 1) Preparar data (copias)
+    # -------------------------
     df_print = distrib_df.copy() if distrib_df is not None else pd.DataFrame()
 
-    # Normalizar nombres posibles
-    # Preferimos usar columnas en minúscula: piso, equipo, dia, cupos, pct
-    # pero soportamos "Piso", "Equipo", "Día", etc.
-    col_piso = _find_col(df_print, ["piso"])
-    col_equipo = _find_col(df_print, ["equipo"])
-    col_dia = _find_col(df_print, ["dia", "día"])
-    col_cupos = _find_col(df_print, ["cupos", "cupo"])
-    col_pct = _find_col(df_print, ["%distrib", "pct", "porcentaje"])
+    # columnas esperadas (acepta mayúsc/minúsc)
+    col_piso  = _find_col(df_print, ["piso"])
+    col_dia   = _find_col(df_print, ["dia", "día"])
+    col_equ   = _find_col(df_print, ["equipo"])
+    col_cup   = _find_col(df_print, ["cupos", "cupo"])
+    col_pct   = _find_col(df_print, ["pct", "%distrib", "% distrib", "%distrib diario", "%distribdiario"])
 
-    # Blindaje mínimo
-    for c in [col_piso, col_equipo, col_dia, col_cupos, col_pct]:
-        if c and c not in df_print.columns:
-            c = None
+    # si faltan columnas críticas, igual genera PDF con lo que haya
+    if df_print.empty or not all([col_dia, col_equ, col_cup]):
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        if logo_path and Path(logo_path).exists():
+            try:
+                pdf.image(str(logo_path), x=10, y=8, w=30)
+            except Exception:
+                pass
+        pdf.ln(25)
+        pdf.cell(0, 10, _clean_text("Informe de Distribución"), ln=True, align="C")
+        pdf.ln(8)
+        pdf.set_font("Arial", "", 11)
+        pdf.multi_cell(0, 6, _clean_text("No hay datos suficientes para generar el informe."))
+        return pdf.output(dest="S").encode("latin-1")
 
-    # --- PÁGINA 1: DISTRIBUCIÓN DIARIA ---
+    # Normalizar piso
+    if col_piso:
+        df_print[col_piso] = df_print[col_piso].apply(_norm_piso)
+    else:
+        df_print["piso_tmp"] = "-"
+        col_piso = "piso_tmp"
+
+    # Normalizar día/equipo
+    df_print[col_dia] = df_print[col_dia].astype(str).str.strip()
+    df_print[col_equ] = df_print[col_equ].astype(str).str.strip()
+
+    # Normalizar cupos a int
+    df_print[col_cup] = df_print[col_cup].apply(lambda x: int(round(_to_num(x, 0))))
+
+    # -------------------------
+    # 2) %Distrib diario coherente (no > 100)
+    # -------------------------
+    # Si pct no existe o está todo vacío => recalcular desde cupos por piso/día
+    need_recalc = False
+    if not col_pct:
+        need_recalc = True
+        df_print["pct_tmp"] = 0.0
+        col_pct = "pct_tmp"
+    else:
+        # si casi todo viene NaN/0 o strings vacíos, recalcula
+        pct_vals = df_print[col_pct].apply(lambda x: _to_num(x, 0.0))
+        if (pct_vals.fillna(0.0).abs().sum() == 0.0):
+            need_recalc = True
+        df_print[col_pct] = pct_vals
+
+    if need_recalc:
+        # base: total cupos por (piso,dia) incluyendo Cupos libres
+        grp = df_print.groupby([col_piso, col_dia], dropna=False)[col_cup].sum().reset_index()
+        grp = grp.rename(columns={col_cup: "_total_pd"})
+        df_print = df_print.merge(grp, on=[col_piso, col_dia], how="left")
+        df_print[col_pct] = df_print.apply(
+            lambda r: (r[col_cup] / r["_total_pd"] * 100.0) if _to_num(r.get("_total_pd", 0), 0) > 0 else 0.0,
+            axis=1
+        )
+        df_print.drop(columns=["_total_pd"], inplace=True, errors="ignore")
+
+    # Clamp final (por seguridad visual)
+    df_print[col_pct] = df_print[col_pct].apply(lambda v: max(0.0, min(100.0, float(_to_num(v, 0.0)))))
+
+    # Orden
+    try:
+        # usa tu helper de ordenamiento si aplica
+        tmp = df_print.rename(columns={col_piso: "piso", col_dia: "dia"})
+        tmp = apply_sorting_to_df(tmp)
+        # revierte nombres a lo que teníamos
+        tmp = tmp.rename(columns={"piso": col_piso, "dia": col_dia})
+        df_print = tmp
+    except Exception:
+        pass
+
+    # -------------------------
+    # Portada + Tabla diaria
+    # -------------------------
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-
     if logo_path and Path(logo_path).exists():
         try:
             pdf.image(str(logo_path), x=10, y=8, w=30)
         except Exception:
             pass
-
     pdf.ln(25)
-    pdf.cell(0, 10, clean_pdf_text("Informe de Distribución"), ln=True, align="C")
-    pdf.ln(6)
+    pdf.cell(0, 10, _clean_text("Informe de Distribución"), ln=True, align="C")
+    pdf.ln(4)
+
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, _clean_text("1. Detalle de Distribución Diaria"), ln=True)
+    pdf.ln(2)
 
     # Tabla diaria
     pdf.set_font("Arial", "B", 9)
-    widths = [28, 70, 28, 22, 28]
-    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib"]
+    widths = [28, 78, 22, 18, 24]  # Piso, Equipo, Día, Cupos, %Distrib
+    headers = ["Piso", "Equipo", "Día", "Cupos", "%Distrib Diario"]
     for w, h in zip(widths, headers):
-        pdf.cell(w, 6, clean_pdf_text(h), 1)
+        pdf.cell(w, 6, _clean_text(h), border=1)
     pdf.ln()
 
     pdf.set_font("Arial", "", 9)
 
-    if df_print is not None and not df_print.empty and col_equipo and col_cupos and col_dia and col_piso:
-        for _, r in df_print.iterrows():
-            piso_val = _safe_str(r.get(col_piso, "-"), "-")
-            equipo_val = _safe_str(r.get(col_equipo, ""), "")
-            dia_val = _safe_str(r.get(col_dia, ""), "")
-            cupos_val = _safe_str(r.get(col_cupos, "0"), "0")
-            pct_val = _safe_str(r.get(col_pct, ""), "")
+    for _, r in df_print.iterrows():
+        piso_val = r.get(col_piso, "-")
+        eq_val = r.get(col_equ, "")
+        dia_val = r.get(col_dia, "")
+        cup_val = r.get(col_cup, 0)
+        pct_val = r.get(col_pct, 0.0)
 
-            # Cupos numérico
-            try:
-                cupos_i = int(float(str(cupos_val).replace(",", ".")))
-            except Exception:
-                cupos_i = 0
+        pdf.cell(widths[0], 6, _clean_text(piso_val)[:12], border=1)
+        pdf.cell(widths[1], 6, _clean_text(eq_val)[:45], border=1)
+        pdf.cell(widths[2], 6, _clean_text(dia_val)[:12], border=1)
+        pdf.cell(widths[3], 6, _clean_text(str(int(cup_val))), border=1, align="R")
+        pdf.cell(widths[4], 6, _clean_text(_pct_fmt(pct_val)), border=1, align="R")
+        pdf.ln()
 
-            # %Distrib “bonito”
-            pct_txt = ""
-            if pct_val != "":
-                try:
-                    pv = float(str(pct_val).replace("%", "").replace(",", "."))
-                    pct_txt = f"{pv:.2f}%"
-                except Exception:
-                    pct_txt = f"{_safe_str(pct_val)}"
-            else:
-                pct_txt = ""
-
-            pdf.cell(widths[0], 6, clean_pdf_text(piso_val)[:18], 1)
-            pdf.cell(widths[1], 6, clean_pdf_text(equipo_val)[:45], 1)
-            pdf.cell(widths[2], 6, clean_pdf_text(dia_val)[:14], 1)
-            pdf.cell(widths[3], 6, clean_pdf_text(str(cupos_i)), 1)
-            pdf.cell(widths[4], 6, clean_pdf_text(pct_txt), 1)
+        # salto de página si está muy abajo
+        if pdf.get_y() > 265:
+            pdf.add_page()
+            pdf.set_font("Arial", "B", 9)
+            for w, h in zip(widths, headers):
+                pdf.cell(w, 6, _clean_text(h), border=1)
             pdf.ln()
-    else:
-        pdf.cell(0, 6, clean_pdf_text("No hay datos de distribución para mostrar."), ln=True)
+            pdf.set_font("Arial", "", 9)
 
-    # --- PÁGINA 2: RESUMEN SEMANAL ---
+    # -------------------------
+    # 2) Resumen semanal por equipo (desde lo mismo)
+    # -------------------------
     pdf.add_page()
-    pdf.set_font("Arial", "B", 11)
-    pdf.cell(0, 10, clean_pdf_text("2. Resumen de Uso Semanal"), ln=True)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 8, _clean_text("2. Resumen de Uso Semanal por Equipo"), ln=True)
+    pdf.ln(2)
 
-    try:
-        if df_print is None or df_print.empty or not col_equipo or not col_cupos:
-            raise ValueError("No hay datos suficientes para calcular resumen semanal.")
+    # Totales semanales desde df_print (excluye Cupos libres para resumen)
+    df_week = df_print.copy()
+    df_week = df_week[df_week[col_equ].str.lower() != "cupos libres"].copy()
 
-        # Agrupar por equipo
-        df_tmp = df_print.copy()
+    # Total semanal = suma cupos
+    wk = df_week.groupby(col_equ, dropna=False)[col_cup].sum().reset_index()
+    wk = wk.rename(columns={col_equ: "Equipo", col_cup: "Total Semanal"})
+    wk["Promedio Diario"] = (wk["Total Semanal"] / 5.0).round(2)
 
-        # Normalizar cupos a número
-        def _to_int(x):
-            try:
-                return int(float(str(x).replace(",", ".")))
-            except Exception:
-                return 0
+    # Dotación opcional desde semanal_df (hoja Equipos o similar)
+    dot_map = infer_team_dotacion_map(semanal_df) if semanal_df is not None else {}
+    wk["Dotación"] = wk["Equipo"].map(dot_map).fillna(0).astype(int)
 
-        df_tmp["_cupos_int"] = df_tmp[col_cupos].apply(_to_int)
+    def _uso(row):
+        dot = int(row["Dotación"])
+        tot = float(row["Total Semanal"])
+        return round((tot / (dot * 5.0) * 100.0), 2) if dot > 0 else 0.0
 
-        stats = df_tmp.groupby(col_equipo, as_index=False, observed=False)["_cupos_int"].sum()
-        stats.columns = ["Equipo", "Total Semanal"]
+    wk["% Uso Semanal"] = wk.apply(_uso, axis=1)
 
-        # Excluir cupos libres
-        stats = stats[stats["Equipo"].astype(str).str.strip().str.lower() != "cupos libres"]
+    wk = wk.sort_values(["Promedio Diario", "Equipo"], ascending=[False, True])
 
-        stats["Promedio Diario"] = (stats["Total Semanal"] / 5).round(2)
+    # tabla resumen
+    pdf.set_font("Arial", "B", 9)
+    w2 = [88, 32, 32, 28]  # Equipo, Prom, Total, %Uso
+    h2 = ["Equipo", "Promedio", "Total Semanal", "% Uso Semanal"]
+    for w, h in zip(w2, h2):
+        pdf.cell(w, 6, _clean_text(h), border=1)
+    pdf.ln()
 
-        # Dotación REAL desde df_equipos
-        team_dots = {}
-        if df_equipos is not None and not df_equipos.empty:
-            team_dots = _dot_map_from_equipos(df_equipos)  # tu helper existente
-        else:
-            # fallback (menos confiable)
-            team_dots = infer_team_dotacion_map(df_print)
-
-        stats["Dotación"] = stats["Equipo"].map(team_dots).fillna(0).astype(int)
-
-        # % Uso semanal: TotalSemanal / (Dotación*5)
-        stats["% Uso Semanal"] = stats.apply(
-            lambda x: (x["Total Semanal"] / (x["Dotación"] * 5) * 100) if x["Dotación"] > 0 else 0.0,
-            axis=1
-        ).round(2)
-
-        stats = stats.sort_values("Promedio Diario", ascending=False)
-
-        # Tabla resumen
-        pdf.set_font("Arial", "B", 9)
-        w_wk = [80, 35, 25, 35]  # Equipo, Promedio, Dotación, %Uso
-        h_wk = ["Equipo", "Prom. Diario", "Dotación", "% Uso Semanal"]
-
-        pdf.set_x(10)
-        for w, h in zip(w_wk, h_wk):
-            pdf.cell(w, 6, clean_pdf_text(h), 1)
+    pdf.set_font("Arial", "", 9)
+    for _, r in wk.iterrows():
+        pdf.cell(w2[0], 6, _clean_text(r["Equipo"])[:45], border=1)
+        pdf.cell(w2[1], 6, _clean_text(str(r["Promedio Diario"])), border=1, align="R")
+        pdf.cell(w2[2], 6, _clean_text(str(int(r["Total Semanal"]))), border=1, align="R")
+        pdf.cell(w2[3], 6, _clean_text(_pct_fmt(r["% Uso Semanal"])), border=1, align="R")
         pdf.ln()
 
-        pdf.set_font("Arial", "", 9)
-        for _, row in stats.iterrows():
-            pdf.set_x(10)
-            pdf.cell(w_wk[0], 6, clean_pdf_text(str(row["Equipo"])[:40]), 1)
-            pdf.cell(w_wk[1], 6, clean_pdf_text(str(row["Promedio Diario"])), 1)
-            pdf.cell(w_wk[2], 6, clean_pdf_text(str(int(row["Dotación"]))), 1)
-            pdf.cell(w_wk[3], 6, clean_pdf_text(f"{float(row['% Uso Semanal']):.2f}%"), 1)
+        if pdf.get_y() > 265:
+            pdf.add_page()
+            pdf.set_font("Arial", "B", 9)
+            for w, h in zip(w2, h2):
+                pdf.cell(w, 6, _clean_text(h), border=1)
             pdf.ln()
+            pdf.set_font("Arial", "", 9)
 
-    except Exception as e:
-        pdf.set_font("Arial", "", 9)
-        pdf.cell(0, 6, clean_pdf_text(f"Error resumen: {str(e)}"), ln=True)
-
-    # --- PÁGINA 3: REPORTE DE DÉFICITS (si existe) ---
-    if deficit_data:
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 11)
-        pdf.cell(0, 10, clean_pdf_text("3. Reporte de Déficits (Mínimos no cumplidos)"), ln=True)
-
-        pdf.set_font("Arial", "B", 9)
-        w = [28, 28, 88, 25, 20]  # Piso, Día, Equipo, Asignado, Faltan
-        headers = ["Piso", "Día", "Equipo", "Asig.", "Faltan"]
-        for wi, h in zip(w, headers):
-            pdf.cell(wi, 6, clean_pdf_text(h), 1)
-        pdf.ln()
-
-        pdf.set_font("Arial", "", 9)
-
-        # Acepta deficit_data como lista de dicts
-        for d in deficit_data:
-            piso = _safe_str(d.get("piso", d.get("Piso", "-")), "-")
-            dia = _safe_str(d.get("dia", d.get("Día", "-")), "-")
-            equipo = _safe_str(d.get("equipo", d.get("Equipo", "-")), "-")
-
-            # Preferencia: asignado / minimo / deficit
-            asignado = d.get("asignado", d.get("Asignado", ""))
-            deficit_val = d.get("deficit", d.get("Cupos Faltantes", d.get("Deficit", "")))
-
-            # Fallback si viene "minimo/asignado" pero no deficit
-            if deficit_val in ("", None):
-                try:
-                    minimo = int(float(str(d.get("minimo", 0)).replace(",", ".")))
-                    asig = int(float(str(d.get("asignado", 0)).replace(",", ".")))
-                    deficit_val = max(0, minimo - asig)
-                except Exception:
-                    deficit_val = ""
-
-            # Normalizar
-            try:
-                asig_i = int(float(str(asignado).replace(",", "."))) if asignado != "" else 0
-            except Exception:
-                asig_i = 0
-            try:
-                def_i = int(float(str(deficit_val).replace(",", "."))) if deficit_val != "" else 0
-            except Exception:
-                def_i = 0
-
-            pdf.cell(w[0], 6, clean_pdf_text(piso)[:18], 1)
-            pdf.cell(w[1], 6, clean_pdf_text(dia)[:14], 1)
-            pdf.cell(w[2], 6, clean_pdf_text(equipo)[:55], 1)
-            pdf.cell(w[3], 6, clean_pdf_text(str(asig_i)), 1)
-            pdf.cell(w[4], 6, clean_pdf_text(str(def_i)), 1)
-            pdf.ln()
-
-        # Observaciones
-        pdf.ln(4)
-        pdf.set_font("Arial", "B", 9)
-        pdf.cell(0, 6, clean_pdf_text("Observaciones:"), ln=True)
-        pdf.set_font("Arial", "", 9)
-        for d in deficit_data[:40]:
-            causa = d.get("causa") or d.get("Observación") or ""
-            if causa:
-                pdf.multi_cell(0, 5, clean_pdf_text(f"- {str(causa)[:200]}"))
-
-    # --- GLOSARIO ---
+    # -------------------------
+    # Glosario (reducido)
+    # -------------------------
     pdf.ln(6)
     pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 8, clean_pdf_text("Glosario y Fórmulas:"), ln=True)
+    pdf.cell(0, 7, _clean_text("Glosario de Métricas y Cálculos:"), ln=True)
     pdf.set_font("Arial", "", 9)
-    pdf.set_x(10)
+    pdf.multi_cell(
+        0, 6,
+        _clean_text(
+            "1. % Distribución Diario = (Cupos del equipo en el día / Total cupos del piso en ese día) * 100.\n"
+            "2. Promedio Diario = (Total Semanal / 5).`
+            "3. % Uso Semanal = (Cupos del equipo en la semana / (Dotación * 5)) * 100 (si hay dotación disponible).\n"
+            "4. Déficit = Máximo(0, Mínimo requerido - Asignado)."
+        )
+    )
 
-    glos = []
-    glos.append("1) Cupos libres: cupos reservados para reservas flex; NO se incluyen en el resumen semanal por equipo.")
-    glos.append("2) Total Semanal (equipo) = SUMA de cupos del equipo en Lunes..Viernes.")
-    glos.append("3) Promedio Diario (equipo) = Total Semanal / 5.")
-    glos.append("4) Dotación (equipo): número de personas del equipo (hoja 'Equipos').")
-    glos.append("5) % Uso Semanal = (Total Semanal / (Dotación * 5)) * 100.")
-    glos.append("6) %Distrib (tabla diaria): porcentaje de cupos del equipo respecto del TOTAL de cupos asignados del día/piso (según como lo genere el motor).")
-    glos.append("7) Déficit: cupos faltantes para cumplir el mínimo definido por reglas. Déficit = max(0, mínimo - asignado).")
+    # -------------------------
+    # 3) Reporte de Déficit (si existe)
+    # -------------------------
+    deficits_ui = filter_minimum_deficits(deficit_data or [])
+    if deficits_ui:
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 13)
+        pdf.set_text_color(180, 0, 0)
+        pdf.cell(0, 8, _clean_text("Reporte de Déficit de Cupos"), ln=True, align="C")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
 
-    pdf.multi_cell(185, 6, clean_pdf_text("\n".join(glos)))
+        # columnas 
+        pdf.set_font("Arial", "B", 9)
+        wd = [14, 58, 20, 14, 14, 14, 56]  # Piso, Equipo, Día, Dot, Min, Falt, Causa
+        hd = ["Piso", "Equipo", "Día", "Dot.", "Min.", "Falt.", "Causa Detallada"]
+        for w, h in zip(wd, hd):
+            pdf.cell(w, 6, _clean_text(h), border=1, align="C")
+        pdf.ln()
+
+        pdf.set_font("Arial", "", 9)
+        for item in deficits_ui:
+            piso = _norm_piso(item.get("piso", "-")).replace("Piso ", "")
+            equipo = str(item.get("equipo", "")).strip()
+            dia = str(item.get("dia", item.get("día", ""))).strip()
+            dot = int(_to_num(item.get("dotacion", item.get("dot", 0)), 0))
+            minimo = int(_to_num(item.get("minimo", 0), 0))
+            falt = int(_to_num(item.get("deficit", 0), 0))
+            causa = str(item.get("causa", "")).strip()
+
+            # fila (con multiline en causa)
+            y0 = pdf.get_y()
+            x0 = pdf.get_x()
+
+            pdf.cell(wd[0], 6, _clean_text(piso), border=1)
+            pdf.cell(wd[1], 6, _clean_text(equipo)[:28], border=1)
+            pdf.cell(wd[2], 6, _clean_text(dia)[:10], border=1, align="C")
+            pdf.cell(wd[3], 6, _clean_text(str(dot)), border=1, align="R")
+            pdf.cell(wd[4], 6, _clean_text(str(minimo)), border=1, align="R")
+
+            # falt en rojo
+            pdf.set_text_color(180, 0, 0)
+            pdf.cell(wd[5], 6, _clean_text(str(falt)), border=1, align="R")
+            pdf.set_text_color(0, 0, 0)
+
+            # causa multiline: usar multi_cell, pero mantener bordes con truco simple
+            x_causa = pdf.get_x()
+            y_causa = pdf.get_y()
+            pdf.multi_cell(wd[6], 6, _clean_text(causa), border=1)
+            y1 = pdf.get_y()
+
+            # volver a la derecha para seguir (multi_cell ya avanzó)
+            pdf.set_xy(x0, y1)
+
+            # salto si necesario
+            if pdf.get_y() > 265:
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 9)
+                for w, h in zip(wd, hd):
+                    pdf.cell(w, 6, _clean_text(h), border=1, align="C")
+                pdf.ln()
+                pdf.set_font("Arial", "", 9)
+
+    # Footer fecha
+    pdf.set_font("Arial", "", 8)
+    pdf.set_text_color(80, 80, 80)
+    try:
+        now = datetime.datetime.now()
+        pdf.ln(2)
+        pdf.cell(0, 6, _clean_text(f"Informe generado el {now.strftime('%d/%m/%Y %H:%M')} hrs"), ln=True, align="R")
+    except Exception:
+        pass
+    pdf.set_text_color(0, 0, 0)
 
     return pdf.output(dest="S").encode("latin-1")
 
@@ -1999,6 +2076,7 @@ elif menu == "Administrador":
         rf = st.selectbox("Formato Reporte", ["Excel (XLSX)", "PDF"], key="report_format")
         if st.button("Generar Reporte de Distribución", key="gen_dist_report"):
             df_raw = read_distribution_df(conn); df_raw = apply_sorting_to_df(df_raw)
+            st.session_state['rd'] = generate_full_pdf(df_raw, st.session_state.get("excel_equipos", df_raw), logo_path=Path(global_logo_path), deficit_data=d_data)
             if "Excel" in rf:
                 b = BytesIO()
                 with pd.ExcelWriter(b, engine='openpyxl') as w: 
@@ -2478,6 +2556,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
