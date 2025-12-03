@@ -1184,7 +1184,7 @@ if menu == "Vista pública":
 
     if df.empty: st.info("Sin datos.")
     else:
-        t1, t2, t3 = st.tabs(["Estadísticas", "Ver Planos", "Reservas de Salas"])
+        t1, t2, t3 = st.tabs(["Estadísticas", "Ver Planos", "Reservas Agendadas"])
         with t1:
             st.markdown("""
                 <style>
@@ -1222,126 +1222,143 @@ if menu == "Vista pública":
             st.subheader("Distribución completa")
             # MODIFICADO: Fix use_container_width
             st.dataframe(df_view, hide_index=True, width=None, use_container_width=True)
-            
-            st.subheader("CALENDARIO DE RESERVA POR PISO FLEX")
-            
-            # Obtener reservas de cupos libres
-            all_res = list_reservations_df(conn)
-            
-            # Selección de mes mediante calendario
-            fecha_base = datetime.date.today().replace(day=1)
-            mes_sel_date = st.date_input(
-                "CALENDARIO DE RESERVA POR PISO FLEX",
-                value=fecha_base,
-                key="cal_reserva_piso_flex"
-            )
-            mes_sel = mes_sel_date.replace(day=1)
-            
-            # Crear calendario por piso
-            pisos_cal = sort_floors(pisos_disponibles)
-            
-        for piso_cal in pisos_cal:
-            # Normaliza para que nunca salga "Piso Piso 1"
-            piso_label = str(piso_cal).strip()
-            if piso_label.lower().startswith("piso piso"):
-                piso_label = piso_label[5:].strip()  # quita el primer "Piso "
-            if not piso_label.lower().startswith("piso"):
-                piso_label = f"Piso {piso_label}"
-
-            with st.expander(f"📅 {piso_label}", expanded=False):
-
-                # Obtener reservas de este piso en el mes seleccionado
-                reservas_piso = []
-                if not all_res.empty:
-                    def _norm_piso_local(x):
-                        s = str(x).strip()
-                        if s.lower().startswith("piso piso"):
-                            s = s[5:].strip()
-                        if not s.lower().startswith("piso"):
-                            s = f"Piso {s}"
-                        return s
-
-                    mask_piso = (
-                        all_res["piso"].astype(str).map(_norm_piso_local) == piso_label
-                    ) & (all_res["team_area"] == "Cupos libres")
-
-                    for _, r in all_res[mask_piso].iterrows():
-                        try:
-                            fecha_res = pd.to_datetime(r["reservation_date"])
-                            if fecha_res.year == mes_sel.year and fecha_res.month == mes_sel.month:
-                                reservas_piso.append({
-                                    "fecha": fecha_res,
-                                    "equipo": r["user_name"],
-                                    "correo": r["user_email"]
-                                })
-                        except:
-                            pass
-
-                import calendar
-                cal = calendar.monthcalendar(mes_sel.year, mes_sel.month)
-
-                html_cal = '<div style="margin: 20px 0; overflow-x: auto;">'
-                html_cal += '<table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; table-layout: fixed;">'
-                html_cal += '<thead><tr style="background-color: #00A04A; color: white;">'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Lun</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mar</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mié</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Jue</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Vie</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Sáb</th>'
-                html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Dom</th>'
-                html_cal += '</tr></thead><tbody>'
-
-                for week in cal:
-                    html_cal += "<tr style='height: 120px;'>"
-                    for day in week:
-                        if day == 0:
-                            html_cal += '<td style="padding: 0; border: 1px solid #ddd; background-color: #f5f5f5; vertical-align: top;"></td>'
-                        else:
-                            fecha_dia = datetime.date(mes_sel.year, mes_sel.month, day)
-                            reservas_dia = [r for r in reservas_piso if r["fecha"].date() == fecha_dia]
-
-                            if reservas_dia:
-                                equipos_lista = [r["equipo"] for r in reservas_dia]
-                                if len(equipos_lista) > 3:
-                                    equipos_mostrar = equipos_lista[:3]
-                                    equipos_restantes = len(equipos_lista) - 3
-                                    equipos_str = "<br>".join([f"• {eq}" for eq in equipos_mostrar])
-                                    equipos_str += f'<br><span style="color: #006B32; font-weight: bold;">+{equipos_restantes} más</span>'
-                                else:
-                                    equipos_str = "<br>".join([f"• {eq}" for eq in equipos_lista])
-
-                                html_cal += f'<td style="padding: 8px 6px; border: 1px solid #ddd; background-color: #e8f5e9; vertical-align: top; min-height: 120px;">'
-                                html_cal += f'<div style="font-size: 14px; font-weight: bold; color: #006B32; margin-bottom: 4px; border-bottom: 1px solid #c8e6c9; padding-bottom: 2px;">{day}</div>'
-                                html_cal += f'<div style="font-size: 10px; color: #2e7d32; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">{equipos_str}</div>'
-                                html_cal += '</td>'
-                            else:
-                                html_cal += f'<td style="padding: 8px 6px; border: 1px solid #ddd; vertical-align: top; min-height: 120px;">'
-                                html_cal += f'<div style="font-size: 14px; font-weight: bold; color: #666; margin-bottom: 4px;">{day}</div>'
-                                html_cal += '<div style="font-size: 9px; color: #999; font-style: italic;">Disponible</div>'
-                                html_cal += '</td>'
-                    html_cal += "</tr>"
-
-                html_cal += '</tbody></table></div>'
-                html_cal += '<style>@media (max-width: 768px) { table { font-size: 10px; } td { padding: 4px 2px !important; min-height: 80px !important; } }</style>'
-
-                st.markdown(html_cal, unsafe_allow_html=True)
         
         with t3:
+            # ==========================
+            # A) RESERVAS DE SALAS (con filtro por piso)
+            # ==========================
             st.subheader("Reservas de Salas de Reuniones")
-            
-            # Obtener reservas de salas
+
             df_salas = get_room_reservations_df(conn)
-            
+
+            # selector de piso para salas
+            pisos_salas = []
+            if not df_salas.empty and "piso" in df_salas.columns:
+                pisos_salas = sort_floors(df_salas["piso"].dropna().unique())
+            if not pisos_salas:
+                pisos_salas = ["Todos"]
+
+            piso_sala_sel = st.selectbox(
+                "Filtrar por piso",
+                ["Todos"] + [p for p in pisos_salas if p != "Todos"],
+                key="pub_salas_piso_filter"
+            )
+
             if df_salas.empty:
                 st.info("No hay reservas de salas registradas.")
             else:
-                # Crear tabla con equipo, sala y hora
                 df_tabla = df_salas[['user_name', 'room_name', 'reservation_date', 'start_time', 'end_time', 'piso']].copy()
                 df_tabla.columns = ['Equipo', 'Sala', 'Fecha', 'Hora Inicio', 'Hora Fin', 'Piso']
                 df_tabla = df_tabla.sort_values(['Fecha', 'Hora Inicio'])
-                
+
+                if piso_sala_sel != "Todos":
+                    df_tabla = df_tabla[df_tabla["Piso"].astype(str) == str(piso_sala_sel)]
+
                 st.dataframe(df_tabla, hide_index=True, width=None, use_container_width=True)
+
+            st.markdown("---")
+
+            # ==========================
+            # B) CALENDARIO PISO FLEX (solo aquí)
+            # ==========================
+            st.subheader("Calendario de reserva para Piso Flex")
+
+            all_res = list_reservations_df(conn)
+
+            fecha_base = datetime.date.today().replace(day=1)
+            mes_sel_date = st.date_input(
+                "Mes a visualizar",
+                value=fecha_base,
+                key="cal_reserva_piso_flex_t3"
+            )
+            mes_sel = mes_sel_date.replace(day=1)
+
+            # pisos disponibles (desde distribución si existe)
+            pisos_cal = sort_floors(pisos_disponibles) if pisos_disponibles else ["Piso 1"]
+
+            import calendar
+            for piso_cal in pisos_cal:
+                piso_label = str(piso_cal).strip()
+                if piso_label.lower().startswith("piso piso"):
+                    piso_label = piso_label[5:].strip()
+                if not piso_label.lower().startswith("piso"):
+                    piso_label = f"Piso {piso_label}"
+
+                with st.expander(f"📅 {piso_label}", expanded=False):
+                    reservas_piso = []
+                    if all_res is not None and not all_res.empty:
+                        def _norm_piso_local(x):
+                            s = str(x).strip()
+                            if s.lower().startswith("piso piso"):
+                                s = s[5:].strip()
+                            if not s.lower().startswith("piso"):
+                                s = f"Piso {s}"
+                            return s
+
+                        mask_piso = (
+                            all_res["piso"].astype(str).map(_norm_piso_local) == piso_label
+                        ) & (all_res["team_area"] == "Cupos libres")
+
+                        for _, r in all_res[mask_piso].iterrows():
+                            try:
+                                fecha_res = pd.to_datetime(r["reservation_date"])
+                                if fecha_res.year == mes_sel.year and fecha_res.month == mes_sel.month:
+                                    reservas_piso.append({
+                                        "fecha": fecha_res,
+                                        "equipo": r["user_name"],
+                                        "correo": r["user_email"]
+                                    })
+                            except:
+                                pass
+
+                    cal = calendar.monthcalendar(mes_sel.year, mes_sel.month)
+
+                    html_cal = '<div style="margin: 20px 0; overflow-x: auto;">'
+                    html_cal += '<table style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; table-layout: fixed;">'
+                    html_cal += '<thead><tr style="background-color: #00A04A; color: white;">'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Lun</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mar</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Mié</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Jue</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Vie</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Sáb</th>'
+                    html_cal += '<th style="padding: 12px 8px; border: 2px solid #006B32; font-size: 13px; font-weight: bold; width: 14.28%;">Dom</th>'
+                    html_cal += '</tr></thead><tbody>'
+
+                    for week in cal:
+                        html_cal += "<tr style='height: 120px;'>"
+                        for day in week:
+                            if day == 0:
+                                html_cal += '<td style="padding: 0; border: 1px solid #ddd; background-color: #f5f5f5; vertical-align: top;"></td>'
+                            else:
+                                fecha_dia = datetime.date(mes_sel.year, mes_sel.month, day)
+                                reservas_dia = [r for r in reservas_piso if r["fecha"].date() == fecha_dia]
+
+                                if reservas_dia:
+                                    equipos_lista = [r["equipo"] for r in reservas_dia]
+                                    if len(equipos_lista) > 3:
+                                        equipos_mostrar = equipos_lista[:3]
+                                        equipos_restantes = len(equipos_lista) - 3
+                                        equipos_str = "<br>".join([f"• {eq}" for eq in equipos_mostrar])
+                                        equipos_str += f'<br><span style="color: #006B32; font-weight: bold;">+{equipos_restantes} más</span>'
+                                    else:
+                                        equipos_str = "<br>".join([f"• {eq}" for eq in equipos_lista])
+
+                                    html_cal += f'<td style="padding: 8px 6px; border: 1px solid #ddd; background-color: #e8f5e9; vertical-align: top; min-height: 120px;">'
+                                    html_cal += f'<div style="font-size: 14px; font-weight: bold; color: #006B32; margin-bottom: 4px; border-bottom: 1px solid #c8e6c9; padding-bottom: 2px;">{day}</div>'
+                                    html_cal += f'<div style="font-size: 10px; color: #2e7d32; line-height: 1.4; word-wrap: break-word; overflow-wrap: break-word;">{equipos_str}</div>'
+                                    html_cal += '</td>'
+                                else:
+                                    html_cal += f'<td style="padding: 8px 6px; border: 1px solid #ddd; vertical-align: top; min-height: 120px;">'
+                                    html_cal += f'<div style="font-size: 14px; font-weight: bold; color: #666; margin-bottom: 4px;">{day}</div>'
+                                    html_cal += '<div style="font-size: 9px; color: #999; font-style: italic;">Disponible</div>'
+                                    html_cal += '</td>'
+                        html_cal += "</tr>"
+
+                    html_cal += '</tbody></table></div>'
+                    html_cal += '<style>@media (max-width: 768px) { table { font-size: 10px; } td { padding: 4px 2px !important; min-height: 80px !important; } }</style>'
+
+                    st.markdown(html_cal, unsafe_allow_html=True)
         
         with t2:
             st.subheader("Descarga de Planos")
@@ -2576,6 +2593,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
