@@ -346,7 +346,7 @@ def compute_distribution_from_excel(
             equipos_info.append({"eq": nm, "per": per, "min": mini})
 
         # ---------------------------------------------------------
-        # SOLO si no ignoras parámetros:
+        # SOLO si no se ignora parámetros:
         # pre-asignar choice ("o") por piso
         # ---------------------------------------------------------
         full_day_choice_assignment = {}
@@ -496,7 +496,7 @@ def compute_distribution_from_excel(
             total_asig = sum(t["asig"] for t in state)
             total_asig = min(total_asig, hard_limit)
 
-            # Score proporción (siempre, porque mide “equidad” del reparto)
+            # Score proporción (siempre)
             sum_per = sum(max(0, t["per"]) for t in state)
             if sum_per > 0 and hard_limit > 0:
                 for t in state:
@@ -519,20 +519,8 @@ def compute_distribution_from_excel(
                     "cupos": int(t["asig"]),
                     "pct": float(pct)
                 })
-            # ✅ Cupos libres SIEMPRE = RESERVA_OBLIGATORIA (ej: 2), si la capacidad total lo permite
-            cupos_libres = min(RESERVA_OBLIGATORIA, cap_total_real)
 
-            pct_lib = round((cupos_libres / cap_total_real * 100.0), 1) if cap_total_real > 0 else 0.0
-            rows.append({
-                "piso": piso_str,
-                "equipo": "Cupos libres",
-                "dia": dia,
-                "cupos": int(cupos_libres),
-                "pct": float(pct_lib)
-            })
-         
-            # Deficit contra “dotación” SOLO si ignore_params=False (porque si ignoras parámetros,
-            # no es un "problema": es el resultado natural de la capacidad limitada)
+            # Deficit contra “dotación” SOLO si ignore_params=False
             if not ignore_params:
                 for t in state:
                     if t["per"] <= 0:
@@ -555,6 +543,18 @@ def compute_distribution_from_excel(
                             "formula": FORMULA_EQUIDAD,
                             "explicacion": EXPLICACION_EQUIDAD
                         })
+
+            # ✅ SIEMPRE agregar "Cupos libres" POR DÍA (si la capacidad real lo permite)
+            # hard_limit = cap_total_real - reserva, así que libres = reserva (o cap_total_real si es menor)
+            libres = RESERVA_OBLIGATORIA if cap_total_real >= RESERVA_OBLIGATORIA else cap_total_real
+            pct_lib = round((libres / cap_total_real * 100.0), 1) if cap_total_real > 0 else 0.0
+            rows.append({
+                "piso": piso_str,
+                "equipo": "Cupos libres",
+                "dia": dia,
+                "cupos": int(libres),
+                "pct": float(pct_lib)
+            })
 
     mse = (total_sq_error / max(1, n_eval))
     score = mse + (total_deficit * 50.0) + (total_recortes_full_day * 200.0)
@@ -612,5 +612,31 @@ def compute_distribution_variants(
 
     variants.sort(key=lambda v: v["score"]["score"])
     return variants
+
+    """
+    variants = []
+    for i in range(max(1, int(n_variants))):
+        seed_i = int(variant_seed) + i
+        rows, deficit, audit, score = compute_distribution_from_excel(
+            equipos_df=equipos_df,
+            parametros_df=parametros_df,
+            df_capacidades=df_capacidades,
+            cupos_reserva=cupos_reserva,
+            ignore_params=ignore_params,
+            variant_seed=seed_i,
+            variant_mode=variant_mode
+        )
+        variants.append({
+            "seed": seed_i,
+            "mode": variant_mode,
+            "rows": rows,
+            "deficit_report": deficit,
+            "audit": audit,
+            "score": score
+        })
+
+    variants.sort(key=lambda v: v["score"]["score"])
+    return variants
+
 
 
