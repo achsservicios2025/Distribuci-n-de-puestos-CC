@@ -528,11 +528,13 @@ def get_distribution_proposal(
     elif strategy == "size_asc" and col_sort:
         eq_proc = eq_proc.sort_values(by=col_sort, ascending=True).reset_index(drop=True)
 
+    CUPOS_LIBRES_FIJOS = 2
+
     rows, deficit_report, audit, score = compute_distribution_from_excel(
         equipos_df=eq_proc,
         parametros_df=pa_proc,
         df_capacidades=df_capacidades,
-        cupos_reserva=2,
+        cupos_reserva=CUPOS_LIBRES_FIJOS,
         ignore_params=ignore_params,
         variant_seed=variant_seed,
         variant_mode=variant_mode,
@@ -1228,13 +1230,13 @@ if menu == "Vista pública":
                         mask = (lib["piso"] == piso) & (lib["dia"] == dia)
                         if not mask.any():
                             # Agregar con 1 cupo mínimo
-                            lib = pd.concat([lib, pd.DataFrame([{"piso": piso, "dia": dia, "cupos": 1}])], ignore_index=True)
+                            lib = pd.concat([lib, pd.DataFrame([{"piso": piso, "dia": dia, "cupos": 2}])], ignore_index=True)
                         else:
                             # Asegurar mínimo 1, máximo 2
                             idx = lib[mask].index[0] if mask.any() else None
                             if idx is not None:
                                 current_val = int(lib.loc[idx, "cupos"]) if pd.notna(lib.loc[idx, "cupos"]) else 1
-                                lib.loc[idx, "cupos"] = max(1, min(2, current_val))
+                                lib.loc[idx, "cupos"] = 2
             
             lib = apply_sorting_to_df(lib)
             
@@ -3105,6 +3107,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
