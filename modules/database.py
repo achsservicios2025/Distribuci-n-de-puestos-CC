@@ -192,17 +192,22 @@ def read_distribution_df(_conn):
     except Exception:
         return pd.DataFrame()
 
-
 @st.cache_data(ttl=60, show_spinner=False)
 def list_reservations_df(_conn):
     ws = get_worksheet(_conn, "reservations")
     if ws is None:
         return pd.DataFrame()
     try:
-        return pd.DataFrame(ws.get_all_records())
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return pd.DataFrame()
+        headers = values[0]
+        rows = values[1:]
+        df = pd.DataFrame(rows, columns=headers)
+        df["_row"] = list(range(2, len(rows) + 2))
+        return df
     except Exception:
         return pd.DataFrame()
-
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_room_reservations_df(_conn):
@@ -210,10 +215,16 @@ def get_room_reservations_df(_conn):
     if ws is None:
         return pd.DataFrame()
     try:
-        return pd.DataFrame(ws.get_all_records())
+        values = ws.get_all_values()
+        if len(values) <= 1:
+            return pd.DataFrame()
+        headers = values[0]
+        rows = values[1:]
+        df = pd.DataFrame(rows, columns=headers)
+        df["_row"] = list(range(2, len(rows) + 2))
+        return df
     except Exception:
         return pd.DataFrame()
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_all_settings(_conn):
@@ -587,6 +598,7 @@ def delete_distribution_rows_by_indices(conn, indices):
 
     except Exception:
         return False
+
 
 
 
