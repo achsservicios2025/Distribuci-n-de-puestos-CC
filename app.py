@@ -1107,6 +1107,7 @@ def confirm_delete_dialog(conn, user_email, fecha_str, area, piso):
     if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key=f"yes_p_{user_email}_{fecha_str}"):
         if delete_reservation_from_db(conn, user_email, fecha_str, area):
             st.success("Eliminada")
+            st.cache_data.clear()
             st.rerun()
         else:
             st.error("No se pudo eliminar")
@@ -3011,6 +3012,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
