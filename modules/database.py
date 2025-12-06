@@ -343,23 +343,25 @@ def user_has_reservation(conn, email, date_str):
     except Exception:
         return False
 
-
-def delete_reservation_from_db(conn, user_mail, date_str, team_area):
+def delete_reservation_from_db(conn, user_identifier, date_str, team_area):
     ws = get_worksheet(conn, "reservations")
     if ws is None:
         return False
     try:
+        ident = str(user_identifier).strip()
         vals = ws.get_all_values()
+
         for i in range(len(vals) - 1, 0, -1):
             r = vals[i]
-            if len(r) >= 5 and r[0] == str(user_mail) and r[3] == str(date_str) and r[4] == str(team_area):
-                ws.delete_rows(i + 1)
-                list_reservations_df.clear()
-                return True
+            if len(r) >= 5 and r[3] == str(date_str) and r[4] == str(team_area):
+                if r[1] == ident or r[0] == ident:
+                    ws.delete_rows(i + 1)
+                    list_reservations_df.clear()
+                    st.cache_data.clear()
+                    return True
         return False
     except Exception:
         return False
-
 
 def count_monthly_free_spots(conn, identifier, date_obj):
     df = list_reservations_df(conn)
@@ -585,6 +587,7 @@ def delete_distribution_rows_by_indices(conn, indices):
 
     except Exception:
         return False
+
 
 
 
