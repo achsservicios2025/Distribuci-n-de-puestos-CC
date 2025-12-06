@@ -1109,8 +1109,12 @@ def render_confirm_delete_dialog(conn):
 
     tipo = payload.get("type")
 
-    title = "Confirmar anulación"
-    with st.modal(title):
+    if not hasattr(st, "dialog"):
+        st.error("Tu versión de Streamlit no soporta popups centrados (st.dialog). Actualiza Streamlit.")
+        return
+
+    @st.dialog("Confirmar anulación")
+    def _dlg():
         if tipo == "puesto":
             st.markdown("### ¿Anular reserva de puesto?")
             st.markdown(
@@ -1119,7 +1123,6 @@ def render_confirm_delete_dialog(conn):
                 f"**🏢** {payload['piso']}  \n"
                 f"**📍** {payload['area']}"
             )
-
             c1, c2 = st.columns(2)
 
             if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key="confirm_yes_puesto"):
@@ -1144,7 +1147,6 @@ def render_confirm_delete_dialog(conn):
                 f"**🏢** {payload['sala']}  \n"
                 f"**🕒** {payload['inicio']}"
             )
-
             c1, c2 = st.columns(2)
 
             if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key="confirm_yes_sala"):
@@ -1166,6 +1168,8 @@ def render_confirm_delete_dialog(conn):
             if c2.button("Cancelar", use_container_width=True, key="confirm_no_sala"):
                 st.session_state.pop("confirm_delete", None)
                 st.rerun()
+
+    _dlg()
 
 # --- UTILS TOKENS ---
 def generate_token(): return uuid.uuid4().hex[:8].upper()
@@ -3083,6 +3087,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
