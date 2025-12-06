@@ -18,7 +18,6 @@ SCOPES = [
 # Helpers
 # =========================================================
 def _to_plain(v):
-    """Convierte tipos raros (numpy/pandas/datetime) a tipos simples serializables."""
     try:
         if hasattr(v, "to_pydatetime"):
             v = v.to_pydatetime()
@@ -66,10 +65,6 @@ def _norm_piso(p):
 
 
 def _safe_float(x, default=None):
-    """
-    Float seguro.
-    - Si viene None/vacío => devuelve default (por defecto None)
-    """
     try:
         if x is None:
             return default
@@ -82,10 +77,6 @@ def _safe_float(x, default=None):
 
 
 def _safe_int(x, default=None):
-    """
-    Int seguro.
-    - Si viene None/vacío => devuelve default (por defecto None)
-    """
     try:
         if x is None:
             return default
@@ -108,7 +99,6 @@ def _ensure_headers(ws, headers):
 
 @st.cache_resource
 def get_conn():
-    """Conecta a Google Sheets."""
     try:
         if "gcp_service_account" not in st.secrets:
             st.error("Faltan secretos: gcp_service_account")
@@ -537,7 +527,6 @@ def perform_granular_delete(conn, option):
 # Borrado individual de distribution
 # =========================================================
 def delete_distribution_row(conn, piso, equipo, dia):
-    """Elimina una fila específica por (piso,equipo,dia)."""
     ws = get_worksheet(conn, "distribution")
     if ws is None:
         return False
@@ -581,10 +570,6 @@ def delete_distribution_row(conn, piso, equipo, dia):
 
 
 def delete_distribution_rows_by_indices(conn, indices):
-    """
-    Elimina varias filas por indices de DataFrame (0-based) asumiendo que
-    el DF proviene de read_distribution_df(). En Sheets, fila real = idx + 2 (por header).
-    """
     ws = get_worksheet(conn, "distribution")
     if ws is None:
         return False
@@ -601,4 +586,5 @@ def delete_distribution_rows_by_indices(conn, indices):
 
     except Exception:
         return False
+
 
