@@ -565,7 +565,7 @@ def filter_minimum_deficits(deficit_list):
 def recompute_pct(rows):
     df = pd.DataFrame(rows)
     if df.empty or not {"piso","dia","equipo","cupos"}.issubset(df.columns):
-        return rows
+        return None
 
     df["cupos"] = pd.to_numeric(df["cupos"], errors="coerce").fillna(0).astype(int)
 
@@ -2326,7 +2326,6 @@ elif menu == "Administrador":
                         if o.get("type") != "rect":
                             continue
                         rect = unscale_rect(o, scale)
-
                         rect.update({
                             "equipo": equipo_sel,
                             "dia": dia_sel,
@@ -2337,8 +2336,9 @@ elif menu == "Administrador":
                         })
                         new_zones.append(rect)
 
-                        zonas_all[piso_sel] = new_zones
-                        return save_zones(zonas_all), len(new_zones)
+                    zonas_all[piso_sel] = new_zones
+                    ok = save_zones(zonas_all)
+                    return ok, len(new_zones) if ok else 0
 
                 def _append_last_rect_only(objs):
                     rects = [o for o in (objs or []) if o.get("type") == "rect"]
@@ -2362,37 +2362,37 @@ elif menu == "Administrador":
                     ok = save_zones(zonas_all)
                     return ok, (1 if ok else 0)
 
-                    objs = (canvas_result.json_data.get("objects", []) if canvas_result and canvas_result.json_data else [])
-                    
-                    if save_one:
-                        ok, n = _append_last_rect_only(objs)
+                objs = (canvas_result.json_data.get("objects", []) if canvas_result and canvas_result.json_data else [])
+
+                if save_one:
+                    ok, n = _append_last_rect_only(objs)
                     if ok:
                         st.success("Zona guardada")
                         st.rerun()
                     else:
                         st.error("No se pudo guardar la zona (¿hay un rectángulo dibujado?)")
 
-                    if save_all:
-                        st.session_state["zones_confirm_save_all"] = True
+                if save_all:
+                    st.session_state["zones_confirm_save_all"] = True
 
-                    if st.session_state.get("zones_confirm_save_all"):
-                        with st.modal("Confirmar guardado"):
-                            st.write(f"Vas a guardar TODOS los rectángulos del canvas en **{piso_sel}**.")
-                            c_ok, c_no = st.columns(2)
-                            
-                            if c_ok.button("Confirmar", type="primary", use_container_width=True, key="zones_confirm_yes"):
-                                objs = (canvas_result.json_data.get("objects", []) if canvas_result and canvas_result.json_data else [])
-                                ok, n = _persist_from_canvas(objs)
-                                st.session_state["zones_confirm_save_all"] = False
-                                if ok:
-                                    st.success(f"Guardadas {n} zonas en {piso_sel}")
-                                    st.rerun()
-                    else:
-                        st.error("No se pudieron guardar las zonas")
-                    if c_no.button("Cancelar", use_container_width=True, key="zones_confirm_no"):
-                        st.session_state["zones_confirm_save_all"] = False
-                        st.rerun()
-    
+                if st.session_state.get("zones_confirm_save_all"):
+                    with st.modal("Confirmar guardado"):
+                        st.write(f"Vas a guardar TODOS los rectángulos del canvas en **{piso_sel}**.")
+                        c_ok, c_no = st.columns(2)
+
+                        if c_ok.button("Confirmar", type="primary", use_container_width=True, key="zones_confirm_yes"):
+                            ok, n = _persist_from_canvas(objs)
+                            st.session_state["zones_confirm_save_all"] = False
+                            if ok:
+                                st.success(f"Guardadas {n} zonas en {piso_sel}")
+                                st.rerun()
+                            else:
+                                st.error("No se pudieron guardar las zonas")
+
+                        if c_no.button("Cancelar", use_container_width=True, key="zones_confirm_no"):
+                            st.session_state["zones_confirm_save_all"] = False
+                            st.rerun()
+
     with t3:
         st.subheader("Descargas")
 
@@ -2896,6 +2896,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
