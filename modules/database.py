@@ -374,6 +374,30 @@ def delete_reservation_from_db(conn, user_identifier, date_str, team_area):
     except Exception:
         return False
 
+def delete_reservation_by_row(conn, row_number: int) -> bool:
+    ws = get_worksheet(conn, "reservations")
+    if ws is None:
+        return False
+    try:
+        ws.delete_rows(int(row_number))
+        list_reservations_df.clear()
+        st.cache_data.clear()
+        return True
+    except Exception:
+        return False
+
+def delete_room_reservation_by_row(conn, row_number: int) -> bool:
+    ws = get_worksheet(conn, "room_reservations")
+    if ws is None:
+        return False
+    try:
+        ws.delete_rows(int(row_number))
+        get_room_reservations_df.clear()
+        st.cache_data.clear()
+        return True
+    except Exception:
+        return False
+
 def count_monthly_free_spots(conn, identifier, date_obj):
     df = list_reservations_df(conn)
     if df.empty:
@@ -598,6 +622,7 @@ def delete_distribution_rows_by_indices(conn, indices):
 
     except Exception:
         return False
+
 
 
 
