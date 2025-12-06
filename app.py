@@ -2820,7 +2820,7 @@ elif menu == "Administrador":
                         deleted = 0
                         for idx in selected_indices_cupos:
                             r = df_cupos.loc[idx]
-                            if delete_reservation_from_db(conn, r['user_name'], r['reservation_date'], r['team_area']):
+                            if delete_reservation_from_db(conn, r['user_email'], r['reservation_date'], r['team_area']):
                                 deleted += 1
                         if deleted > 0:
                             st.success(f"✅ {deleted} reserva(s) eliminada(s)")
@@ -3011,6 +3011,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
