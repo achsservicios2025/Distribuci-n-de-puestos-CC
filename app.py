@@ -2326,8 +2326,7 @@ elif menu == "Administrador":
                     ]
 
                 current = st.session_state["zones_color"]
-                st.color_picker(" ", value=current, key="zones_color_picker")  # compact native picker
-                # keep session in sync
+                st.color_picker(" ", value=current, key="zones_color_picker") 
                 st.session_state["zones_color"] = st.session_state["zones_color_picker"]
 
                 with st.expander("Paleta (Word)", expanded=False):
@@ -2347,9 +2346,11 @@ elif menu == "Administrador":
                     custom_hex = (custom_hex or "").strip()
                     if custom_hex and not custom_hex.startswith("#"):
                         custom_hex = "#" + custom_hex
+
                     if re.match(r"^#[0-9a-fA-F]{6}$", custom_hex):
                         st.session_state["zones_color"] = custom_hex
-                        st.session_state["zones_color_picker"] = custom_hex
+                        st.session_state["zones_color_picker_override"] = custom_hex
+                        st.rerun()
 
                     if "zones_undo_snapshot" not in st.session_state:
                         st.session_state["zones_undo_snapshot"] = None
@@ -2998,6 +2999,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
