@@ -410,10 +410,9 @@ def generate_distribution_math_correct(
                 if c <= 0:
                     continue
                 total_asignado += c
-                rows.append({"piso": piso, "dia": dia, "equipo": t, "cupos": int(c), "pct": 0})
+                rows.append({"piso": piso, "dia": dia, "equipo": t, "cupos": int(c)})
 
-            # cupos libres al final
-            rows.append({"piso": piso, "dia": dia, "equipo": "Cupos libres", "cupos": int(libres), "pct": 0})
+                rows.append({"piso": piso, "dia": dia, "equipo": "Cupos libres", "cupos": int(libres)})
 
             # sanity check
             if total_asignado + libres != cap:
@@ -1446,14 +1445,17 @@ elif menu == "Reservas":
                 
                 with st.form("form_puesto"):
                     cf1, cf2 = st.columns(2)
+                    nombre = cf1.text_input("Nombre")
                     area_equipo = cf1.selectbox("Área / Equipo", equipos_disponibles if equipos_disponibles else ["General"])
                     em = cf2.text_input("Correo Electrónico")
                     
                     submitted = st.form_submit_button("Confirmar Reserva", type="primary", disabled=(disponibles <= 0))
                     
                     if submitted:
+                        if not nombre.strip():
+                            st.error("Por favor ingresa tu nombre.")
                         if not em:
-                            st.error("Por favor completa el correo electrónico.")
+                            st.error("Por favor ingresa tu correo electrónico.")
                         elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', em):
                             st.error("Por favor ingresa un correo electrónico válido (ejemplo: usuario@ejemplo.com).")
                         elif user_has_reservation(conn, em, str(fe)):
@@ -1996,10 +1998,9 @@ elif menu == "Administrador":
                             return round((cupos / personas) * 100, 2)
                         return 0.0
 
-                    df_preview["% de Uso diario"] = df_preview.apply(_pct_uso, axis=1)
+                    df_preview["% uso diario"] = df_preview.apply(_pct_uso, axis=1)
 
-                    # ✅ dejar SOLO estas columnas
-                    df_show = df_preview[["piso", "equipo", "dia", "cupos", "% de Uso diario"]].copy()
+                    df_show = df_preview[["piso","equipo","dia","cupos","% uso diario"]]
                     df_show = df_show.rename(columns={
                         "piso": "Piso",
                         "equipo": "Equipo",
@@ -2780,6 +2781,7 @@ elif menu == "Administrador":
                         ws.clear()
                         ws.append_row(["user_name", "user_email", "piso", "reservation_date", "team_area", "created_at"])
                         safe_clear_cache(list_reservations_df)
+                        st.cache_data.clear()
                         st.success("✅ Todas las reservas de puestos eliminadas")
                         st.rerun()
             else:
@@ -2823,6 +2825,7 @@ elif menu == "Administrador":
                         ws.clear()
                         ws.append_row(["user_name", "user_email", "piso", "room_name", "reservation_date", "start_time", "end_time", "created_at"])
                         safe_clear_cache(get_room_reservations_df)
+                        st.cache_data.clear()
                         st.success("✅ Todas las reservas de salas eliminadas")
                         st.rerun()
             else:
@@ -2876,10 +2879,12 @@ elif menu == "Administrador":
                     ws = get_worksheet(conn, "distribution")
                     if ws:
                         ws.clear()
-                        ws.append_row(["piso", "equipo", "dia", "cupos", "pct", "created_at"])
+                        ws.append_row(["piso", "equipo", "dia", "cupos", "dotacion", "% uso diario", "% uso semanal", "created_at"])
                         safe_clear_cache(read_distribution_df)
+                        st.cache_data.clear()
                         st.success("✅ Toda la distribución eliminada")
                         st.rerun()
+
             else:
                 st.info("No hay distribuciones guardadas")
         
@@ -2951,6 +2956,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
