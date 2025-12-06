@@ -1150,13 +1150,14 @@ def render_confirm_delete_dialog(conn):
             c1, c2 = st.columns(2)
 
             if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key="confirm_yes_sala"):
-                ok = delete_room_reservation_from_db(
-                    conn,
-                    payload["user_identifier"],
-                    payload["fecha"],
-                    payload["sala"],
-                    payload["inicio"]
-                )
+                    ok = delete_room_reservation_from_db(
+                        conn,
+                        payload["user_identifier"],
+                        payload["fecha"],
+                        payload["sala"],
+                        inicio
+                    )
+
                 st.session_state.pop("confirm_delete", None)
                 if ok:
                     st.success("Eliminada")
@@ -1812,13 +1813,12 @@ elif menu == "Reservas":
 
                             fecha = str(r.get("reservation_date", "")).strip()
                             piso = str(r.get("piso", "")).strip()
-                            area = str(r.get("team_area", "")).strip()
-                            email = str(r.get("user_email", "")).strip().lower()
-
-                            c1.markdown(f"**{fecha}** | {piso} (Cupo Libre)")
+                            team_area_real = str(r.get("team_area", "")).strip()
+                            if team_area_real.lower() != "cupos libres":
+                                team_area_real = "Cupos libres"
 
                             if c2.button("Anular", key=f"del_p_{idx}", type="primary"):
-                                open_confirm_delete_puesto(conn, email, fecha, area, piso)
+                                open_confirm_delete_puesto(conn, email, fecha, team_area_real, piso)
 
                 if not ms.empty:
                     st.markdown("#### 🏢 Tus Salas")
@@ -1828,14 +1828,12 @@ elif menu == "Reservas":
 
                             fecha = str(r.get("reservation_date", "")).strip()
                             sala = str(r.get("room_name", "")).strip()
-                            inicio = str(r.get("start_time", "")).strip()
-                            fin = str(r.get("end_time", "")).strip()
-                            email = str(r.get("user_email", "")).strip().lower()
+                            inicio_raw = str(r.get("start_time", "")).strip()
 
-                            c1.markdown(f"**{fecha}** | {sala} | {inicio} - {fin}")
+                            inicio_norm = inicio_raw[:5] if len(inicio_raw) >= 5 else inicio_raw
 
                             if c2.button("Anular", key=f"del_s_{idx}", type="primary"):
-                                open_confirm_delete_sala(conn, email, fecha, sala, inicio)
+                                open_confirm_delete_sala(conn, email, fecha, sala, inicio_norm)
 
         st.markdown("---")
 
@@ -3087,6 +3085,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
