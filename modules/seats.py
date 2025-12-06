@@ -323,6 +323,8 @@ def compute_distribution_from_excel(
 
         # equipos_info
         equipos_info = []
+            weekly_assigned = {info["eq"]: 0 for info in equipos_info}
+            weekly_capacity_total = 0  # capacidad total por día * 5 (incluye reserva)
         for _, r in df_piso.iterrows():
             nm = str(r.get(col_equipo, "")).strip()
             if not nm:
@@ -346,15 +348,10 @@ def compute_distribution_from_excel(
 
             equipos_info.append({"eq": nm, "per": per, "min": mini})
 
-        # ---------------------------------------------------------
-        # SOLO si no ignoras parámetros:
-        # pre-asignar choice ("o") por piso
-        # ---------------------------------------------------------
         full_day_choice_assignment = {}
         if not ignore_params and reglas_full_day:
             load_by_day = {d: 0 for d in dias_semana}
 
-            # fixed suman carga
             for info in equipos_info:
                 nm_norm = normalize_text(info["eq"])
                 rule = reglas_full_day.get(nm_norm)
@@ -363,7 +360,6 @@ def compute_distribution_from_excel(
                         if d in dias_semana:
                             load_by_day[d] += info["per"]
 
-            # choice se elige con heurística + seed
             for info in equipos_info:
                 nm = info["eq"]
                 nm_norm = normalize_text(nm)
@@ -497,7 +493,11 @@ def compute_distribution_from_excel(
             total_asig = sum(t["asig"] for t in state)
             total_asig = min(total_asig, hard_limit)
 
-            # Score proporción (siempre)
+            for t in state:
+                weekly_assigned[t["eq"]] = weekly_assigned.get(t["eq"], 0) + int(t["asig"])
+
+            weekly_capacity_total += int(cap_total_real)
+
             sum_per = sum(max(0, t["per"]) for t in state)
             if sum_per > 0 and hard_limit > 0:
                 for t in state:
@@ -508,20 +508,17 @@ def compute_distribution_from_excel(
                     total_sq_error += err * err
                     n_eval += 1
 
-            # Output rows + pct
             for t in state:
                 if t["asig"] <= 0:
                     continue
-                pct = round((t["asig"] / total_asig * 100.0), 1) if total_asig > 0 else 0.0
                 rows.append({
                     "piso": piso_str,
                     "equipo": t["eq"],
                     "dia": dia,
                     "cupos": int(t["asig"]),
-                    "pct": float(pct)
+                    "pct": None  # %Uso semanal, se completa post-loop
                 })
 
-            # Deficit contra “dotación” SOLO si ignore_params=False
             if not ignore_params:
                 for t in state:
                     if t["per"] <= 0:
@@ -613,3 +610,4 @@ def compute_distribution_variants(
 
     variants.sort(key=lambda v: v["score"]["score"])
     return variants
+
