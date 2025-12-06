@@ -369,8 +369,7 @@ def count_monthly_free_spots(conn, identifier, date_obj):
         m_str = date_obj.strftime("%Y-%m")
         mask = (
             ((df["user_email"].astype(str) == str(identifier)) | (df["user_name"].astype(str) == str(identifier))) &
-            (df["reservation_date"].astype(str).str.contains(m_str)) &
-            (df["team_area"].astype(str) == "Cupos libres")
+            (df["reservation_date"].astype(str).str.contains(m_str))
         )
         return int(len(df[mask]))
     except Exception:
@@ -586,5 +585,6 @@ def delete_distribution_rows_by_indices(conn, indices):
 
     except Exception:
         return False
+
 
 
