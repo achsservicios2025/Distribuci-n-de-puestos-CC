@@ -1110,7 +1110,7 @@ def render_confirm_delete_dialog(conn):
     tipo = payload.get("type")
 
     if not hasattr(st, "dialog"):
-        st.error("Tu versión de Streamlit no soporta popups centrados (st.dialog). Actualiza Streamlit.")
+        st.error("Esta versión de Streamlit no soporta popups centrados (st.dialog). Actualiza Streamlit.")
         return
 
     @st.dialog("Confirmar anulación")
@@ -3087,6 +3087,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
