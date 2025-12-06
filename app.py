@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit
 import pandas as pd
 import datetime
 import os
@@ -10,7 +9,6 @@ import re
 from pathlib import Path
 import matplotlib.pyplot as plt
 from fpdf import FPDF
-from PIL import Image as PILImage
 from PIL import Image
 from io import BytesIO
 import base64
@@ -2250,10 +2248,10 @@ elif menu == "Administrador":
                                 st.session_state["zones_color"] = hx
                                 st.session_state["zones_color_picker"] = hx
                                 st.rerun()
-                                st.markdown(
-                                    f"""<div style="width:28px;height:28px;border-radius:6px;border:1px solid #999;background:{hx};margin-top:-28px;margin-bottom:10px;"></div>""",
-                                    unsafe_allow_html=True
-                                )
+                            st.markdown(
+                                f"""<div style="width:28px;height:28px;border-radius:6px;border:1px solid #999;background:{hx};margin-top:-28px;margin-bottom:10px;"></div>""",
+                                unsafe_allow_html=True
+                            )
 
                     custom_hex = st.text_input("Personalizar (#RRGGBB)", value=st.session_state["zones_color"], key="zones_hex")
                     custom_hex = (custom_hex or "").strip()
@@ -2896,6 +2894,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
