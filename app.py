@@ -1816,7 +1816,6 @@ elif menu == "Administrador":
                         st.session_state['selected_variant_idx'] = None
                         st.toast("✅ Distribución ideal generada.")
                     else:
-                        # Con parámetros => variantes (choice 'o' + desempates)
                         variants = compute_distribution_variants(
                             equipos_df=df_eq,
                             parametros_df=df_pa,
@@ -1842,7 +1841,8 @@ elif menu == "Administrador":
                         } if best else None
 
                         st.success("✅ Distribución generada (con parámetros + variantes).")
-                    
+                    except Exception as e:
+                        st.error(f"❌ Error procesando el Excel: {e}")
         # -----------------------------------------------------------
         # ZONA DE RESULTADOS
         # -----------------------------------------------------------
@@ -2953,6 +2953,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
