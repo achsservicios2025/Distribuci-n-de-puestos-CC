@@ -1083,37 +1083,77 @@ def generate_full_pdf(
 
     return pdf.output(dest="S").encode("latin-1")
 
-def confirm_delete_room_dialog(conn, user_email, fecha_str, sala, inicio):
-    user_email = str(user_email).strip().lower()
-    fecha_str = str(fecha_str).strip()
-    sala = str(sala).strip()
-    inicio = str(inicio).strip()  # importante
+def open_confirm_delete_puesto(conn, user_identifier, fecha_str, area, piso):
+    st.session_state["confirm_delete"] = {
+        "type": "puesto",
+        "user_identifier": str(user_identifier).strip(),
+        "fecha": str(fecha_str).strip(),
+        "area": str(area).strip(),
+        "piso": str(piso).strip(),
+    }
+    st.rerun()
 
-    st.warning(f"¿Anular reserva de sala?\n\n📧 {user_email} | 📅 {fecha_str}\n🏢 {sala} ({inicio})")
-    c1, c2 = st.columns(2)
-    if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key=f"yes_s_{user_email}_{fecha_str}_{inicio}"):
-        ok = delete_room_reservation_from_db(conn, user_email, fecha_str, sala, inicio)
-        if ok:
-            st.success("Eliminada")
-            st.cache_data.clear()
-            st.rerun()
-        else:
-            st.error("No se pudo eliminar")
-    if c2.button("Cancelar", use_container_width=True, key=f"no_s_{user_email}_{fecha_str}_{inicio}"):
-        st.rerun()
+def open_confirm_delete_sala(conn, user_identifier, fecha_str, sala, inicio):
+    st.session_state["confirm_delete"] = {
+        "type": "sala",
+        "user_identifier": str(user_identifier).strip(),
+        "fecha": str(fecha_str).strip(),
+        "sala": str(sala).strip(),
+        "inicio": str(inicio).strip(),
+    }
+    st.rerun()
 
-def confirm_delete_dialog(conn, user_email, fecha_str, area, piso):
-    st.warning(f"¿Anular reserva de puesto?\n\n📧 {user_email} | 📅 {fecha_str}\n🏢 {piso} | 📍 {area}")
-    c1, c2 = st.columns(2)
-    if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key=f"yes_p_{user_email}_{fecha_str}"):
-        if delete_reservation_from_db(conn, user_email, fecha_str, area):
-            st.success("Eliminada")
-            st.cache_data.clear()
+def render_confirm_delete_dialog(conn):
+    payload = st.session_state.get("confirm_delete")
+    if not payload:
+        return
+
+    tipo = payload.get("type")
+
+    if tipo == "puesto":
+        st.warning(
+            f"¿Anular reserva de puesto?\n\n"
+            f"📧 {payload['user_identifier']} | 📅 {payload['fecha']}\n"
+            f"🏢 {payload['piso']} | 📍 {payload['area']}"
+        )
+        c1, c2 = st.columns(2)
+
+        if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key="confirm_yes_puesto"):
+            ok = delete_reservation_from_db(conn, payload["user_identifier"], payload["fecha"], payload["area"])
+            st.session_state.pop("confirm_delete", None)
+            if ok:
+                st.success("Eliminada")
+                st.cache_data.clear()
+            else:
+                st.error("No se pudo eliminar")
             st.rerun()
-        else:
-            st.error("No se pudo eliminar")
-    if c2.button("Cancelar", use_container_width=True, key=f"no_p_{user_email}_{fecha_str}"):
-        st.rerun()
+
+        if c2.button("Cancelar", use_container_width=True, key="confirm_no_puesto"):
+            st.session_state.pop("confirm_delete", None)
+            st.rerun()
+
+    elif tipo == "sala":
+        st.warning(
+            f"¿Anular reserva de sala?\n\n"
+            f"📧 {payload['user_identifier']} | 📅 {payload['fecha']}\n"
+            f"🏢 {payload['sala']} ({payload['inicio']})"
+        )
+        c1, c2 = st.columns(2)
+
+        if c1.button("🔴 Sí, anular", type="primary", use_container_width=True, key="confirm_yes_sala"):
+            ok = delete_room_reservation_from_db(conn, payload["user_identifier"], payload["fecha"], payload["sala"], payload["inicio"])
+            st.session_state.pop("confirm_delete", None)
+            if ok:
+                st.success("Eliminada")
+                st.cache_data.clear()
+            else:
+                st.error("No se pudo eliminar")
+            st.rerun()
+
+        if c2.button("Cancelar", use_container_width=True, key="confirm_no_sala"):
+            st.session_state.pop("confirm_delete", None)
+            st.rerun()
+
 
 # --- UTILS TOKENS ---
 def generate_token(): return uuid.uuid4().hex[:8].upper()
@@ -1686,62 +1726,64 @@ elif menu == "Reservas":
     # OPCIÓN 3: GESTIONAR (ANULAR Y VER TODO)
     # ---------------------------------------------------------
     elif opcion_reserva == "📋 Mis Reservas y Listados":
-    
+
         # --- SECCION 1: BUSCADOR PARA ANULAR ---
         st.subheader("Buscar y Cancelar mis reservas")
         q = st.text_input("Ingresa tu Correo o Nombre para buscar:")
-    
+
         mp = pd.DataFrame()
         ms = pd.DataFrame()
-    
+
         if q:
             dp = list_reservations_df(conn)
             ds = get_room_reservations_df(conn)
-    
+
             def ensure_cols(df):
                 if df is None or df.empty:
                     return df
                 df = df.copy()
                 df.columns = [str(c).strip() for c in df.columns]
-    
+
                 rename_map = {}
                 if "user_name" not in df.columns:
                     for c in df.columns:
                         if c.lower() in ["nombre", "name", "usuario", "user", "user name", "user_name"]:
                             rename_map[c] = "user_name"
                             break
-    
+
                 if "user_email" not in df.columns:
                     for c in df.columns:
                         if c.lower() in ["correo", "email", "mail", "e-mail", "user email", "user_email"]:
                             rename_map[c] = "user_email"
                             break
-    
+
                 return df.rename(columns=rename_map)
-    
+
             dp = ensure_cols(dp)
             ds = ensure_cols(ds)
-    
+
             required = {"user_name", "user_email"}
             if (dp is not None and not dp.empty and not required.issubset(set(dp.columns))) or \
-            (ds is not None and not ds.empty and not required.issubset(set(ds.columns))):
-                st.error(f"Faltan columnas para buscar. Encontré en Puestos: {list(dp.columns)} | en Salas: {list(ds.columns)}")
+               (ds is not None and not ds.empty and not required.issubset(set(ds.columns))):
+                st.error(
+                    f"Faltan columnas para buscar. Encontré en Puestos: {list(dp.columns)} | en Salas: {list(ds.columns)}"
+                )
                 st.stop()
-    
+
             ql = q.strip().lower()
-    
+
             if dp is not None and not dp.empty:
                 mp = dp[
                     dp["user_name"].fillna("").astype(str).str.lower().str.contains(ql, na=False) |
                     dp["user_email"].fillna("").astype(str).str.lower().str.contains(ql, na=False)
                 ]
-    
+
             if ds is not None and not ds.empty:
                 ms = ds[
                     ds["user_name"].fillna("").astype(str).str.lower().str.contains(ql, na=False) |
                     ds["user_email"].fillna("").astype(str).str.lower().str.contains(ql, na=False)
                 ]
-    
+
             if mp.empty and ms.empty:
                 st.warning("No encontré reservas con esos datos.")
             else:
@@ -1750,31 +1792,36 @@ elif menu == "Reservas":
                     for idx, r in mp.iterrows():
                         with st.container(border=True):
                             c1, c2 = st.columns([5, 1])
-                            c1.markdown(f"**{r['reservation_date']}** | {r['piso']} (Cupo Libre)")
-                            if c2.button("Anular", key=f"del_p_{idx}", type="primary"):
-                                rownum = int(r["_row"])
-                                ok = delete_reservation_by_row(conn, rownum)
-                                if ok:
-                                    st.success("Eliminada")
-                                    st.rerun()
-                                else:
-                                    st.error("No se pudo eliminar")
+
+                            fecha = str(r.get("reservation_date", "")).strip()
+                            piso = str(r.get("piso", "")).strip()
+                            area = str(r.get("team_area", "")).strip()
+                            email = str(r.get("user_email", "")).strip().lower()
     
+                            c1.markdown(f"**{fecha}** | {piso} (Cupo Libre)")
+
+                            if c2.button("Anular", key=f"del_p_{idx}", type="primary"):
+                                confirm_delete_dialog(conn, email, fecha, area, piso)
+                                st.stop() 
+
                 if not ms.empty:
                     st.markdown("#### 🏢 Tus Salas")
                     for idx, r in ms.iterrows():
                         with st.container(border=True):
                             c1, c2 = st.columns([5, 1])
-                            c1.markdown(f"**{r['reservation_date']}** | {r['room_name']} | {r['start_time']} - {r['end_time']}")
+
+                            fecha = str(r.get("reservation_date", "")).strip()
+                            sala = str(r.get("room_name", "")).strip()
+                            inicio = str(r.get("start_time", "")).strip()
+                            fin = str(r.get("end_time", "")).strip()
+                            email = str(r.get("user_email", "")).strip().lower()
+
+                            c1.markdown(f"**{fecha}** | {sala} | {inicio} - {fin}")
+
                             if c2.button("Anular", key=f"del_s_{idx}", type="primary"):
-                                rownum = int(r["_row"])
-                                ok = delete_room_reservation_by_row(conn, rownum)
-                                if ok:
-                                    st.success("Eliminada")
-                                    st.rerun()
-                                else:
-                                    st.error("No se pudo eliminar")
-    
+                                confirm_delete_room_dialog(conn, email, fecha, sala, inicio)
+                                st.stop()
+
         st.markdown("---")
     
         # --- SECCION 2 ---
@@ -3025,6 +3072,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
