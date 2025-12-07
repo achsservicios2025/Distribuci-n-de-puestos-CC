@@ -166,11 +166,14 @@ div[data-baseweb="select"] > div {{
 }}
 
 /* ✅ Alinear la columna derecha al borde derecho */
-.mk-right {{
+.mk-right-wrap{
+  width: 100%;
+}
+.mk-right-inner{
+  width: 100%;
   display: flex;
   justify-content: flex-end;
-}}
-
+}
 /*
 ✅ Forzamos que "Acceder" mida EXACTAMENTE lo mismo que "Olvidaste tu contraseña".
 Ajusta este ancho si cambias el texto del botón izquierdo.
@@ -378,4 +381,5 @@ else:
     screen_admin(conn)
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
