@@ -10,7 +10,9 @@ import numpy as np
 from io import BytesIO
 from PIL import Image
 from fpdf import FPDF
-import base64
+
+import streamlit.components.v1 as components
+from streamlit_drawable_canvas import st_canvas
 
 # ---------------------------------------------------------
 # 1) CONFIG STREAMLIT
@@ -40,7 +42,6 @@ try:
 except ImportError:
     def delete_distribution_row(conn, piso, equipo, dia):
         return False
-
     def delete_distribution_rows_by_indices(conn, indices):
         return False
 
@@ -50,9 +51,6 @@ from modules.seats import compute_distribution_from_excel, compute_distribution_
 from modules.emailer import send_reservation_email
 from modules.rooms import generate_time_slots, check_room_conflict
 from modules.zones import generate_colored_plan, load_zones, save_zones
-
-from streamlit_drawable_canvas import st_canvas
-import streamlit.components.v1 as components
 
 # ---------------------------------------------------------
 # 3) CONSTANTES / DIRS
@@ -77,9 +75,11 @@ st.session_state.setdefault("ui", {
     "logo_width": 420,
 })
 
-# Inicio = Administrador
 st.session_state.setdefault("screen", "Administrador")
 st.session_state.setdefault("forgot_mode", False)
+
+# marcador interno para "click logo"
+st.session_state.setdefault("_go_home", False)
 
 # ---------------------------------------------------------
 # 4.5) DB + SETTINGS
@@ -98,38 +98,10 @@ st.session_state["ui"]["app_title"] = settings.get("site_title", st.session_stat
 st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state["ui"]["logo_path"])
 
 # ---------------------------------------------------------
-# ✅ HANDLER: click en logo -> vuelve al inicio
-# ---------------------------------------------------------
-def _handle_home_queryparam():
-    # Streamlit nuevo: st.query_params
-    try:
-        home = st.query_params.get("home", None)
-        if home is not None:
-            st.session_state["screen"] = "Administrador"
-            st.session_state["top_menu_select"] = "—"
-            # limpiar query param
-            st.query_params.clear()
-            st.rerun()
-        return
-    except Exception:
-        pass
-
-    # Fallback legacy
-    try:
-        qp = st.experimental_get_query_params()
-        if "home" in qp:
-            st.session_state["screen"] = "Administrador"
-            st.session_state["top_menu_select"] = "—"
-            st.experimental_set_query_params()
-            st.rerun()
-    except Exception:
-        pass
-
-_handle_home_queryparam()
-
-# ---------------------------------------------------------
 # 5) CSS
 # ---------------------------------------------------------
+BTN_W = 260  # ancho fijo para ambos botones (ajústalo si cambias texto)
+
 st.markdown(f"""
 <style>
 .stApp {{
@@ -156,9 +128,6 @@ section.main > div {{
 
 .mk-content {{
   width: 100%;
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
 }}
 
 html, body, [class*="css"] {{
@@ -195,21 +164,24 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* mismo ancho para ambos botones del login */
-button[kind="primary"][data-testid="baseButton-primary"] {{
-  width: 320px !important;
-}}
-button[data-testid="baseButton-secondary"] {{
-  width: 320px !important;
+.mk-right {{
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
 }}
 
-/* ✅ logo clickeable */
-.mk-logo-link {{
+button[kind="primary"][data-testid="baseButton-primary"] {{
+  width: {BTN_W}px !important;
+}}
+
+button[data-testid="baseButton-secondary"] {{
+  width: {BTN_W}px !important;
+}}
+
+/* Logo clickeable (sin link, solo cursor) */
+.mk-logo {{
   display: inline-block;
   cursor: pointer;
-}}
-.mk-logo-img {{
-  display: block;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -239,13 +211,53 @@ def clean_pdf_text(s: str) -> str:
 def go(screen: str):
     st.session_state["screen"] = screen
 
-def _img_to_data_uri(path: Path) -> str:
-    b = path.read_bytes()
-    ext = path.suffix.lower().replace(".", "")
-    if ext == "jpg":
-        ext = "jpeg"
-    mime = f"image/{ext if ext in ['png','jpeg','webp'] else 'png'}"
-    return f"data:{mime};base64," + base64.b64encode(b).decode("utf-8")
+def go_home():
+    st.session_state["screen"] = "Administrador"
+    st.session_state["top_menu_select"] = "—"
+    st.session_state["forgot_mode"] = False
+
+# ---------------------------------------------------------
+# CLICK LOGO (SIN NAVEGAR)
+# ---------------------------------------------------------
+def logo_click_listener():
+    """
+    Inserta un div sobre el logo que, al click, setea un flag en session_state
+    sin navegación (sin href).
+    """
+    # Si el JS puso el flag, volvemos al inicio
+    if st.session_state.get("_go_home", False):
+        st.session_state["_go_home"] = False
+        go_home()
+        st.rerun()
+
+    # Este componente manda un mensaje al parent y Streamlit lo refleja con un input hidden
+    # truco: usamos localStorage + rerun por postMessage NO es estable, entonces usamos
+    # un botón "proxy" oculto via querySelector click().
+
+    components.html(
+        """
+        <div id="mkLogoProxy" style="display:none;"></div>
+        <script>
+          // Busca el contenedor del logo que marcamos con class mk-logo y lo hace clickeable
+          const logo = window.parent.document.querySelector('.mk-logo');
+          const proxyBtn = window.parent.document.querySelector('button[kind="secondary"][data-testid="baseButton-secondary"][aria-label="__mk_go_home__"]');
+          if (logo && proxyBtn) {
+            logo.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              proxyBtn.click(); // dispara el botón Streamlit sin navegar
+            };
+          }
+        </script>
+        """,
+        height=0,
+    )
+
+    # Botón oculto (proxy) que dispara el cambio de estado
+    # aria-label para encontrarlo con JS
+    if st.button("__mk_go_home__", key="__mk_go_home__", help=None):
+        st.session_state["_go_home"] = True
+        st.rerun()
 
 # ---------------------------------------------------------
 # TOPBAR
@@ -254,27 +266,17 @@ def render_topbar_and_menu():
     logo_path = Path(st.session_state.ui["logo_path"])
     size = int(st.session_state.ui.get("title_font_size", 64))
     title = st.session_state.ui.get("app_title", "Gestor de Puestos y Salas")
-    logo_w = int(st.session_state.ui.get("logo_width", 420))
 
     c1, c2, c3 = st.columns([1.2, 3.6, 1.2], vertical_alignment="center")
 
     with c1:
         if logo_path.exists():
-            # ✅ Click REAL sobre la imagen: <a href="?home=1"><img .../></a>
-            data_uri = _img_to_data_uri(logo_path)
-            st.markdown(
-                f"""
-                <a class="mk-logo-link" href="?home=1" title="Volver al inicio">
-                  <img class="mk-logo-img" src="{data_uri}" style="width:{logo_w}px; height:auto;" />
-                </a>
-                """,
-                unsafe_allow_html=True
-            )
+            # Logo con wrapper HTML para que el JS lo encuentre (sin href)
+            st.markdown("<div class='mk-logo'>", unsafe_allow_html=True)
+            st.image(str(logo_path), width=int(st.session_state.ui.get("logo_width", 420)))
+            st.markdown("</div>", unsafe_allow_html=True)
         else:
-            if st.button("🧩 Inicio", key="logo_home_fallback"):
-                st.session_state["top_menu_select"] = "—"
-                go("Administrador")
-                st.rerun()
+            st.write("🧩 (Logo aquí)")
 
     with c2:
         st.markdown(f"<div class='mk-title' style='font-size:{size}px;'>{title}</div>", unsafe_allow_html=True)
@@ -302,23 +304,23 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
+        # fila botones: izq normal, der pegado a la derecha
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
-
         with c1:
             if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
                 st.session_state["forgot_mode"] = True
                 st.rerun()
 
         with c2:
-            _, btn_col = st.columns([1, 1], vertical_alignment="center")
-            with btn_col:
-                if st.button("Acceder", type="primary", key="btn_admin_login", use_container_width=True):
-                    e = st.session_state.get("admin_login_email", "").strip()
-                    p = st.session_state.get("admin_login_pass", "")
-                    if not e or not p:
-                        st.warning("Completa correo y contraseña.")
-                    else:
-                        st.success("Login recibido (validación real pendiente).")
+            st.markdown("<div class='mk-right'>", unsafe_allow_html=True)
+            if st.button("Acceder", type="primary", key="btn_admin_login"):
+                e = st.session_state.get("admin_login_email", "").strip()
+                p = st.session_state.get("admin_login_pass", "")
+                if not e or not p:
+                    st.warning("Completa correo y contraseña.")
+                else:
+                    st.success("Login recibido (validación real pendiente).")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     else:
         st.text_input("Correo de acceso", key="admin_reset_email")
@@ -410,8 +412,8 @@ def screen_descargas_distribucion_planos(conn):
 # ---------------------------------------------------------
 # APP
 # ---------------------------------------------------------
-st.markdown("<div class='mk-content'>", unsafe_allow_html=True)
 render_topbar_and_menu()
+logo_click_listener()  # <- activa click sin navegar
 st.divider()
 
 screen = st.session_state.get("screen", "Administrador")
@@ -423,7 +425,5 @@ elif screen == "Reservas":
 elif screen == "Planos":
     screen_descargas_distribucion_planos(conn)
 else:
-    st.session_state["screen"] = "Administrador"
+    go_home()
     screen_admin(conn)
-
-st.markdown("</div>", unsafe_allow_html=True)
