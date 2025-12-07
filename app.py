@@ -1808,35 +1808,31 @@ elif menu == "Reservas":
 
                 if not mp.empty:
                     st.markdown("#### 🪑 Tus Puestos")
+
                     for idx, r in mp.iterrows():
                         with st.container(border=True):
                             c1, c2 = st.columns([5, 1])
 
-                            fecha = str(r.get("reservation_date", "")).strip()
-                            piso = str(r.get("piso", "")).strip()
-                            team_area_real = str(r.get("team_area", "")).strip()
-                            if team_area_real.lower() != "cupos libres":
-                                team_area_real = "Cupos libres"
+                            user_email = str(r.get("user_email", "")).strip()
+                            user_name  = str(r.get("user_name", "")).strip()
+                            fecha      = str(r.get("reservation_date", "")).strip()
+                            piso       = str(r.get("piso", "")).strip()
+                            area       = str(r.get("team_area", "")).strip()
+
+                            if area.lower() != "cupos libres":
+                                area = "Cupos libres"
+
+                            with c1:
+                                st.markdown(
+                                    f"**📅 Fecha:** {fecha}  \n"
+                                    f"**🏢 Piso:** {piso}  \n"
+                                    f"**📍 Ubicación:** {area}  \n"
+                                    f"**👤 Nombre:** {user_name}  \n"
+                                    f"**📧 Correo:** {user_email}"
+                                )
 
                             if c2.button("Anular", key=f"del_p_{idx}", type="primary"):
-                                user_email = str(r.get("user_email", "")).strip()
-                                open_confirm_delete_puesto(conn, user_email, fecha, team_area_real, piso)
-
-                if not ms.empty:
-                    st.markdown("#### 🏢 Tus Salas")
-                    for idx, r in ms.iterrows():
-                        with st.container(border=True):
-                            c1, c2 = st.columns([5, 1])
-
-                            fecha = str(r.get("reservation_date", "")).strip()
-                            sala = str(r.get("room_name", "")).strip()
-                            inicio_raw = str(r.get("start_time", "")).strip()
-
-                            inicio_norm = inicio_raw[:5] if len(inicio_raw) >= 5 else inicio_raw
-
-                            if c2.button("Anular", key=f"del_s_{idx}", type="primary"):
-                                user_email = str(r.get("user_email", "")).strip()
-                                open_confirm_delete_sala(conn, user_email, fecha, sala, inicio_norm)
+                                open_confirm_delete_puesto(conn, user_email, fecha, area, piso)
 
         st.markdown("---")
 
@@ -2574,7 +2570,6 @@ elif menu == "Administrador":
     with t3:
         st.subheader("Descargas")
 
-        # Separar informes de cupos y salas
         st.markdown("### 📊 Informes de Distribución")
         rf = st.selectbox("Formato Reporte", ["Excel (XLSX)", "PDF"], key="report_format")
         if st.button("Generar Reporte de Distribución", key="gen_dist_report"):
@@ -2707,7 +2702,7 @@ elif menu == "Administrador":
                 
                 st.session_state['salas_report'] = b.getvalue()
                 st.session_state['salas_report_name'] = "reservas_salas.xlsx"
-                st.success("✅ Informe de salas generado")
+                st.success("Informe de salas generado")
             else:
                 st.warning("No hay reservas de salas registradas")
         
@@ -3088,6 +3083,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
