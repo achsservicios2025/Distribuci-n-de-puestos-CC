@@ -97,8 +97,6 @@ st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state
 
 # ---------------------------------------------------------
 # 5) CSS
-#   ✅ "Acceder" mismo ancho que "Olvidaste..."
-#   ✅ "Acceder" a la derecha (por layout, no por div wrapper)
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -243,8 +241,8 @@ def screen_admin(conn):
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
         # ✅ Misma fila:
-        # - Izquierda: "Olvidaste tu contraseña"
-        # - Derecha: "Acceder" pegado al borde derecho del layout
+        # - Izquierda: Olvidaste...
+        # - Derecha: Acceder PEGADO a la derecha (respetando margen)
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
 
         with c1:
@@ -253,11 +251,11 @@ def screen_admin(conn):
                 st.rerun()
 
         with c2:
-            # Truco: una sub-grilla dentro de la columna derecha
-            # deja un "espaciador" y pone el botón en la columna final.
-            spacer, btn_col = st.columns([3, 1], vertical_alignment="center")
+            # subgrid que ocupa TODO el ancho de la columna derecha
+            # el botón va en la última columna y se expande hasta el borde derecho
+            _, btn_col = st.columns([1, 1], vertical_alignment="center")
             with btn_col:
-                if st.button("Acceder", type="primary", key="btn_admin_login"):
+                if st.button("Acceder", type="primary", key="btn_admin_login", use_container_width=True):
                     e = st.session_state.get("admin_login_email", "").strip()
                     p = st.session_state.get("admin_login_pass", "")
                     if not e or not p:
