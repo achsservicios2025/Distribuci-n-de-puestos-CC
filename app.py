@@ -1743,6 +1743,7 @@ elif menu == "Reservas":
     # ---------------------------------------------------------
     else:
         render_confirm_delete_dialog(conn)
+        
         if not mp.empty:
             st.markdown("#### 🪑 Tus Puestos")
 
@@ -3051,6 +3052,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
