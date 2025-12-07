@@ -6,9 +6,27 @@ import pandas as pd
 import tempfile
 import os
 from datetime import datetime
+from tu_modulo_helpers import clean_pdf_text 
+import unicodedata
 
 STATIC_DIR = Path("static")
 
+def clean_pdf_text(s: str) -> str:
+    if s is None:
+        return ""
+    s = str(s)
+    s = (s.replace("–", "-")
+           .replace("—", "-")
+           .replace("−", "-")
+           .replace("“", '"')
+           .replace("”", '"')
+           .replace("’", "'")
+           .replace("‘", "'")
+           .replace("•", "-")
+           .replace("\u00a0", " "))
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("latin-1", "replace").decode("latin-1")
+    return s
 
 def _tmp_png_path(filename: str) -> Path:
     return Path(tempfile.gettempdir()) / filename
@@ -73,7 +91,7 @@ class ReportPDF(FPDF):
         # Fecha emisión (derecha, estilo encabezado)
         self.set_font("Arial", "", 9)
         self.set_xy(10, 10)
-        self.cell(0, 6, f"Emisión: {self.issued_at_str}", ln=0, align="R")
+        self.cell(0, 6, clean_pdf_text(f"Emisión: {self.issued_at_str}"), ln=0, align="R")
 
         # Separador
         self.ln(16)
@@ -98,10 +116,10 @@ class ReportPDF(FPDF):
 
 def _add_section_title(pdf: FPDF, title: str, subtitle: str | None = None):
     pdf.set_font("Arial", "B", 13)
-    pdf.cell(0, 8, title, ln=True)
+    pdf.cell(0, 8, clean_pdf_text(title), ln=True)
     if subtitle:
         pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 5, subtitle)
+        pdf.multi_cell(0, 5, clean_pdf_text(subtitle))
     pdf.ln(2)
 
 
@@ -124,7 +142,7 @@ def _add_glossary_box(pdf: FPDF, lines: list[str]):
 
     pdf.set_font("Arial", "", 8.5)
     for ln in lines:
-        pdf.multi_cell(w - 6, 4.2, f"• {ln}")
+        pdf.multi_cell(w - 6, 4.2, clean_pdf_text(f"- {ln}"))
 
     # dejar cursor debajo
     pdf.set_xy(x, y + 30)
@@ -135,13 +153,13 @@ def _table(pdf: FPDF, headers: list[str], rows: list[list[str]], widths: list[in
 
     pdf.set_font("Arial", "B", 9)
     for i, h in enumerate(headers):
-        pdf.cell(widths[i], 7, h, 1, 0, "C")
+        pdf.cell(widths[i], 7, clean_pdf_text(h), 1, 0, "C")
     pdf.ln()
 
     pdf.set_font("Arial", "", 8.8)
     for r in rows:
         for i, cell in enumerate(r):
-            pdf.cell(widths[i], 6, cell, 1, 0, aligns[i])
+            pdf.cell(widths[i], 6, clean_pdf_text(cell), 1, 0, aligns[i])
         pdf.ln()
 
 
