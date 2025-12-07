@@ -3,7 +3,8 @@ import pandas as pd
 import re
 import unicodedata
 from pathlib import Path
-from typing import Optionalimport random
+from typing import Optional
+import random
 import datetime
 import numpy as np
 from io import BytesIO
@@ -1837,6 +1838,7 @@ def generate_full_pdf(
     pdf.set_text_color(0, 0, 0)
 
     return pdf.output(dest="S").encode("latin-1")
+
 
 
 
