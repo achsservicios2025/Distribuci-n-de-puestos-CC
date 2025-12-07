@@ -97,8 +97,8 @@ st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state
 
 # ---------------------------------------------------------
 # 5) CSS
-#   ✅ Botón "Acceder" realmente pegado a la derecha
-#   ✅ "Acceder" mismo ancho que "Olvidaste..." (fijo)
+#   ✅ "Acceder" mismo ancho que "Olvidaste..."
+#   ✅ "Acceder" a la derecha (por layout, no por div wrapper)
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -165,30 +165,10 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* ✅ Contenedor para empujar el botón a la derecha */
-.mk-right-wrap {{
-  width: 100%;
-}}
-.mk-right-inner {{
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-}}
-
-/* ✅ Asegura que el botón quede en "su línea" dentro del wrapper */
-.mk-right-inner .stButton {{
-  width: auto !important;
-  display: inline-block !important;
-}}
-
-/*
-✅ Forzamos que "Acceder" mida EXACTAMENTE lo mismo que "Olvidaste tu contraseña".
-*/
+/* ✅ Mismo ancho para ambos botones */
 button[kind="primary"][data-testid="baseButton-primary"] {{
   width: 320px !important;
 }}
-
-/* También dejamos el botón izquierdo con el mismo ancho */
 button[data-testid="baseButton-secondary"] {{
   width: 320px !important;
 }}
@@ -262,7 +242,9 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
-        # ✅ Misma fila: izquierdo normal, derecho pegado a borde derecho
+        # ✅ Misma fila:
+        # - Izquierda: "Olvidaste tu contraseña"
+        # - Derecha: "Acceder" pegado al borde derecho del layout
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
 
         with c1:
@@ -271,16 +253,17 @@ def screen_admin(conn):
                 st.rerun()
 
         with c2:
-            # ✅ wrapper 100% ancho + flex-end real
-            st.markdown("<div class='mk-right-wrap'><div class='mk-right-inner'>", unsafe_allow_html=True)
-            if st.button("Acceder", type="primary", key="btn_admin_login"):
-                e = st.session_state.get("admin_login_email", "").strip()
-                p = st.session_state.get("admin_login_pass", "")
-                if not e or not p:
-                    st.warning("Completa correo y contraseña.")
-                else:
-                    st.success("Login recibido (validación real pendiente).")
-            st.markdown("</div></div>", unsafe_allow_html=True)
+            # Truco: una sub-grilla dentro de la columna derecha
+            # deja un "espaciador" y pone el botón en la columna final.
+            spacer, btn_col = st.columns([3, 1], vertical_alignment="center")
+            with btn_col:
+                if st.button("Acceder", type="primary", key="btn_admin_login"):
+                    e = st.session_state.get("admin_login_email", "").strip()
+                    p = st.session_state.get("admin_login_pass", "")
+                    if not e or not p:
+                        st.warning("Completa correo y contraseña.")
+                    else:
+                        st.success("Login recibido (validación real pendiente).")
 
     else:
         st.text_input("Correo de acceso", key="admin_reset_email")
