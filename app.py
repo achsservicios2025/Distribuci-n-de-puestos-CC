@@ -97,8 +97,8 @@ st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state
 
 # ---------------------------------------------------------
 # 5) CSS
+#   ✅ Botón "Acceder" realmente pegado a la derecha
 #   ✅ "Acceder" mismo ancho que "Olvidaste..." (fijo)
-#   ✅ "Acceder" alineado a la derecha
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -165,19 +165,24 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* ✅ Alinear la columna derecha al borde derecho */
-.mk-right-wrap{
+/* ✅ Contenedor para empujar el botón a la derecha */
+.mk-right-wrap {{
   width: 100%;
-}
-.mk-right-inner{
+}}
+.mk-right-inner {{
   width: 100%;
   display: flex;
   justify-content: flex-end;
-}
+}}
+
+/* ✅ Asegura que el botón quede en "su línea" dentro del wrapper */
+.mk-right-inner .stButton {{
+  width: auto !important;
+  display: inline-block !important;
+}}
+
 /*
 ✅ Forzamos que "Acceder" mida EXACTAMENTE lo mismo que "Olvidaste tu contraseña".
-Ajusta este ancho si cambias el texto del botón izquierdo.
-Con los tamaños actuales, 320px calza bien para ambos.
 */
 button[kind="primary"][data-testid="baseButton-primary"] {{
   width: 320px !important;
@@ -257,13 +262,16 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
-        # ✅ Misma fila. Izq botón izquierdo, der botón derecho pegado a borde.
+        # ✅ Misma fila: izquierdo normal, derecho pegado a borde derecho
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
+
         with c1:
             if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
                 st.session_state["forgot_mode"] = True
                 st.rerun()
+
         with c2:
+            # ✅ wrapper 100% ancho + flex-end real
             st.markdown("<div class='mk-right-wrap'><div class='mk-right-inner'>", unsafe_allow_html=True)
             if st.button("Acceder", type="primary", key="btn_admin_login"):
                 e = st.session_state.get("admin_login_email", "").strip()
@@ -381,5 +389,3 @@ else:
     screen_admin(conn)
 
 st.markdown("</div>", unsafe_allow_html=True)
-
-
