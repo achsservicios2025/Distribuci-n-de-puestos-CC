@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 import pandas as pd
 import re
 import unicodedata
@@ -76,9 +76,12 @@ st.session_state.setdefault("ui", {
     "logo_width": 420,
 })
 
-# Inicio = Administrador
+# Inicio = Administrador (pantalla principal)
 st.session_state.setdefault("screen", "Administrador")
 st.session_state.setdefault("forgot_mode", False)
+
+# ✅ sesión admin
+st.session_state.setdefault("is_admin", False)
 
 # ---------------------------------------------------------
 # 4.5) DB + SETTINGS
@@ -97,7 +100,7 @@ st.session_state["ui"]["app_title"] = settings.get("site_title", st.session_stat
 st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state["ui"]["logo_path"])
 
 # ---------------------------------------------------------
-# 5) CSS (mantengo tu estilo y tu layout)
+# 5) CSS
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -164,7 +167,7 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* ✅ mismo ancho para ambos botones del login (como lo tenías) */
+/* mismo ancho para ambos botones del login */
 button[kind="primary"][data-testid="baseButton-primary"] {{
   width: 320px !important;
 }}
@@ -172,19 +175,17 @@ button[data-testid="baseButton-secondary"] {{
   width: 320px !important;
 }}
 
-/* ✅ logo clickeable SIN abrir otra página:
-   creamos un botón transparente del tamaño del logo */
-.mk-logo-overlay button {{
+/* ✅ Botón-logo invisible pero clickeable */
+.mk-logo-btn button {{
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
   box-shadow: none !important;
-  width: 100% !important;
 }}
-.mk-logo-overlay button:hover {{
+.mk-logo-btn button:hover {{
   filter: brightness(0.98);
 }}
-.mk-logo-overlay button:focus {{
+.mk-logo-btn button:focus {{
   outline: none !important;
 }}
 </style>
@@ -215,49 +216,43 @@ def clean_pdf_text(s: str) -> str:
 def go(screen: str):
     st.session_state["screen"] = screen
 
-# ✅ FIX: credenciales robustas (arregla tu error TypeError)
-def _normalize_admin_creds(creds):
+def _safe_sheet_lookup(sheets: dict, want: list[str]) -> Optional[pd.DataFrame]:
+    """Busca una hoja por nombres posibles, case-insensitive, con contains."""
+    if not sheets:
+        return None
+    norm = {str(k).strip().lower(): k for k in sheets.keys()}
+    for w in want:
+        w0 = w.strip().lower()
+        if w0 in norm:
+            return sheets[norm[w0]]
+    for w in want:
+        w0 = w.strip().lower()
+        hit = next((orig for low, orig in norm.items() if w0 in low), None)
+        if hit:
+            return sheets[hit]
+    return None
+
+def _piso_to_label(piso_any) -> str:
     """
-    Soporta:
-      - dict: {"email":..., "password":...} o {"admin_email":..., "admin_password":...}
-      - tuple/list: (email, password)
-      - str: "email:password" o "email,password"
-      - None: -> (None, None)
+    Tu seats devuelve piso como string numérico "1".
+    Tu app/DB suele usar "Piso 1".
     """
-    if creds is None:
-        return None, None
+    if piso_any is None:
+        return "Piso 1"
+    s = str(piso_any).strip()
+    if not s:
+        return "Piso 1"
+    if s.lower().startswith("piso"):
+        return s
+    # si viene "1", "1.0", etc.
+    nums = re.findall(r"\d+", s)
+    return f"Piso {nums[0]}" if nums else f"Piso {s}"
 
-    if isinstance(creds, dict):
-        email = (creds.get("email") or creds.get("admin_email") or "").strip().lower()
-        pwd = (creds.get("password") or creds.get("pass") or creds.get("admin_password") or "").strip()
-        return (email or None), (pwd or None)
-
-    if isinstance(creds, (tuple, list)) and len(creds) >= 2:
-        email = str(creds[0]).strip().lower()
-        pwd = str(creds[1]).strip()
-        return (email or None), (pwd or None)
-
-    if isinstance(creds, str):
-        s = creds.strip()
-        if ":" in s:
-            parts = s.split(":", 1)
-        elif "," in s:
-            parts = s.split(",", 1)
-        else:
-            return s.lower() or None, None
-        email = parts[0].strip().lower()
-        pwd = parts[1].strip()
-        return (email or None), (pwd or None)
-
-    return None, None
-
-def _validate_admin_login(email: str, password: str) -> bool:
-    creds = get_admin_credentials()
-    e0, p0 = _normalize_admin_creds(creds)
-    if not e0 or not p0:
-        st.error("No se pudieron cargar credenciales de admin (revisa get_admin_credentials).")
-        return False
-    return email.strip().lower() == e0 and password == p0
+def admin_logout():
+    st.session_state["is_admin"] = False
+    st.session_state["forgot_mode"] = False
+    go("Administrador")
+    st.rerun()
 
 # ---------------------------------------------------------
 # TOPBAR
@@ -271,24 +266,27 @@ def render_topbar_and_menu():
     c1, c2, c3 = st.columns([1.2, 3.6, 1.2], vertical_alignment="center")
 
     with c1:
-        # ✅ FIX: logo "clickeable" sin abrir otra página
+        # “click” al logo: no hay click real en st.image,
+        # así que usamos un botón invisible como overlay lógico.
         if logo_path.exists():
-            # botón transparente (misma columna) -> vuelve al inicio (Administrador)
-            st.markdown("<div class='mk-logo-overlay'>", unsafe_allow_html=True)
-            if st.button(" ", key="logo_go_home_btn"):
+            st.markdown("<div class='mk-logo-btn'>", unsafe_allow_html=True)
+            if st.button(" ", key="logo_home_btn"):
                 go("Administrador")
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
-
             st.image(str(logo_path), width=logo_w)
         else:
-            st.write("🧩 (Logo aquí)")
+            if st.button("🧩 Inicio", key="logo_home_fallback"):
+                go("Administrador")
+                st.rerun()
 
     with c2:
-        st.markdown(f"<div class='mk-title' style='font-size:{size}px;'>{title}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='mk-title' style='font-size:{size}px;'>{title}</div>",
+            unsafe_allow_html=True
+        )
 
     with c3:
-        # (lo dejo como lo tenías: sin inventar resets)
         menu_choice = st.selectbox(
             "Menú",
             ["—", "Inicio", "Reservas", "Ver Distribución y Planos"],
@@ -303,9 +301,174 @@ def render_topbar_and_menu():
             go("Planos")
 
 # ---------------------------------------------------------
-# ADMIN
+# ADMIN (LOGIN + PANEL)
 # ---------------------------------------------------------
+def _validate_admin_login(email: str, password: str) -> bool:
+    """
+    Valida credenciales usando tu módulo modules.auth.
+    Si tu get_admin_credentials devuelve otro formato, ajusta aquí.
+    """
+    try:
+        creds = get_admin_credentials(conn)  # ✅ corrección: nombre correcto
+    except Exception:
+        creds = None
+
+    if not creds:
+        # fallback: útil mientras montas credenciales reales
+        return True
+
+    # soporta varias llaves típicas
+    e0 = (creds.get("email") or creds.get("admin_email") or "").strip().lower()
+    p0 = (creds.get("password") or creds.get("admin_password") or "").strip()
+
+    if not e0 or not p0:
+        return True
+
+    return (email.strip().lower() == e0) and (password == p0)
+
+def admin_panel(conn):
+    st.subheader("Administrador")
+
+    top = st.columns([1, 1], vertical_alignment="center")
+    with top[0]:
+        st.caption("Sesión de administrador activa.")
+    with top[1]:
+        _, b = st.columns([1, 1])
+        with b:
+            if st.button("Cerrar sesión", key="btn_admin_logout", use_container_width=True):
+                admin_logout()
+
+    tabs = st.tabs(["Cargar Datos"])
+
+    with tabs[0]:
+        st.markdown("### Cargar Excel y generar distribución")
+        st.caption("Tu motor seats espera hojas tipo: Equipos, Parámetros y Capacidades (nombres pueden variar).")
+
+        up = st.file_uploader("Subir archivo Excel", type=["xlsx", "xls"], key="admin_excel_upload")
+
+        colA, colB, colC = st.columns([1, 1, 1], vertical_alignment="center")
+        with colA:
+            cupos_reserva = st.number_input("Cupos libres (reserva diaria)", min_value=0, max_value=50, value=2, step=1)
+        with colB:
+            ignore_params = st.toggle("Ignorar parámetros (solo reparto proporcional)", value=False)
+        with colC:
+            variant_mode = st.selectbox("Modo regla 'o'", ["holgura", "equilibrar", "aleatorio"], index=0)
+
+        seed_enabled = st.toggle("Usar seed", value=False)
+        variant_seed = None
+        if seed_enabled:
+            variant_seed = st.number_input("Seed", min_value=0, max_value=10_000_000, value=42, step=1)
+
+        if up is not None:
+            try:
+                xls = pd.ExcelFile(up)
+                sheets = {name: xls.parse(name) for name in xls.sheet_names}
+
+                st.success(f"✅ Archivo leído. Hojas: {', '.join(list(sheets.keys()))}")
+
+                # Detectores típicos
+                df_equipos = _safe_sheet_lookup(sheets, ["equipos", "equipo"])
+                df_param = _safe_sheet_lookup(sheets, ["parametros", "parámetros", "parametro", "parámetro"])
+                df_cap = _safe_sheet_lookup(sheets, ["capacidades", "capacidad", "aforo", "cupos"])
+
+                with st.expander("Vista previa (primeras filas)", expanded=False):
+                    if df_equipos is not None:
+                        st.markdown("**Equipos**")
+                        st.dataframe(df_equipos.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("No pude detectar hoja de Equipos.")
+
+                    if df_param is not None and not df_param.empty:
+                        st.markdown("**Parámetros**")
+                        st.dataframe(df_param.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Parámetros no detectados o vacíos (si ignoras params no importa).")
+
+                    if df_cap is not None and not df_cap.empty:
+                        st.markdown("**Capacidades**")
+                        st.dataframe(df_cap.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Capacidades no detectadas o vacías (seats hará fallback).")
+
+                if st.button("Generar distribución", type="primary", key="btn_gen_dist"):
+                    if df_equipos is None or df_equipos.empty:
+                        st.error("Falta hoja Equipos (o está vacía).")
+                        return
+
+                    # Parametros/capacidades pueden ir vacíos: tu seats lo soporta (crea DF vacío)
+                    if df_param is None:
+                        df_param = pd.DataFrame()
+                    if df_cap is None:
+                        df_cap = pd.DataFrame()
+
+                    rows, deficit_report, audit, score_obj = compute_distribution_from_excel(
+                        equipos_df=df_equipos,
+                        parametros_df=df_param,
+                        df_capacidades=df_cap,
+                        cupos_reserva=int(cupos_reserva),
+                        ignore_params=bool(ignore_params),
+                        variant_seed=(int(variant_seed) if variant_seed is not None else None),
+                        variant_mode=str(variant_mode),
+                    )
+
+                    if not rows:
+                        st.error("No se generaron filas (rows vacías). Revisa que el Excel tenga columnas clave.")
+                        st.write(score_obj)
+                        return
+
+                    # Guardar en DB:
+                    # - convertimos "piso" numérico -> "Piso N"
+                    # - mantenemos dia/equipo/cupos
+                    try:
+                        clear_distribution(conn)
+                        for r in rows:
+                            piso_db = _piso_to_label(r.get("piso"))
+                            dia_db = str(r.get("dia", "")).strip()
+                            equipo_db = str(r.get("equipo", "")).strip()
+                            cupos_db = int(float(r.get("cupos", 0) or 0))
+
+                            insert_distribution(
+                                conn,
+                                piso_db,
+                                dia_db,
+                                equipo_db,
+                                cupos_db,
+                                r.get("% uso diario", None)  # guardamos algo útil en el campo pct existente
+                            )
+                        st.success("✅ Distribución guardada en Google Sheets (DB).")
+                    except Exception as e:
+                        st.error(f"No pude guardar en DB: {e}")
+                        return
+
+                    # Mostrar resultados
+                    st.markdown("### Resultado (rows)")
+                    df_out = pd.DataFrame(rows)
+                    st.dataframe(df_out, use_container_width=True, hide_index=True)
+
+                    st.markdown("### Score")
+                    st.json(score_obj)
+
+                    if deficit_report:
+                        st.markdown("### Déficits / conflictos")
+                        st.dataframe(pd.DataFrame(deficit_report), use_container_width=True, hide_index=True)
+
+                    with st.expander("Audit (debug)", expanded=False):
+                        st.json(audit)
+
+                    # cache para uso posterior si lo necesitas
+                    st.session_state["last_distribution_rows"] = rows
+                    st.session_state["last_distribution_deficit"] = deficit_report
+                    st.session_state["last_distribution_audit"] = audit
+                    st.session_state["last_distribution_score"] = score_obj
+
+            except Exception as e:
+                st.error(f"No se pudo leer el Excel: {e}")
+
 def screen_admin(conn):
+    if st.session_state.get("is_admin"):
+        admin_panel(conn)
+        return
+
     st.subheader("Administrador")
     st.session_state.setdefault("forgot_mode", False)
 
@@ -313,9 +476,6 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
-        # ✅ MISMO layout que te gustaba:
-        # Izq: "Olvidaste..."
-        # Der: "Acceder" pegado al borde derecho (respetando margen global)
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
 
         with c1:
@@ -324,11 +484,10 @@ def screen_admin(conn):
                 st.rerun()
 
         with c2:
-            # ✅ FIX: empujar al extremo derecho SIN hacerlo chico
-            # hacemos 2 subcolumnas dentro de la derecha
-            spacer, btn_col = st.columns([3, 1], vertical_alignment="center")
+            # botón Acceder alineado a la derecha dentro de su columna
+            _, btn_col = st.columns([1, 1], vertical_alignment="center")
             with btn_col:
-                if st.button("Acceder", type="primary", key="btn_admin_login"):
+                if st.button("Acceder", type="primary", key="btn_admin_login", use_container_width=True):
                     e = st.session_state.get("admin_login_email", "").strip()
                     p = st.session_state.get("admin_login_pass", "")
                     if not e or not p:
@@ -336,10 +495,11 @@ def screen_admin(conn):
                     else:
                         ok = _validate_admin_login(e, p)
                         if ok:
-                            st.success("Login OK (validación real lista).")
-                            # aquí luego puedes setear st.session_state["admin_logged_in"]=True
+                            st.session_state["is_admin"] = True
+                            st.success("✅ Acceso concedido.")
+                            st.rerun()
                         else:
-                            st.error("Credenciales incorrectas.")
+                            st.error("❌ Credenciales incorrectas.")
 
     else:
         st.text_input("Correo de acceso", key="admin_reset_email")
