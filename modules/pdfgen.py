@@ -6,7 +6,6 @@ import pandas as pd
 import tempfile
 import os
 from datetime import datetime
-from tu_modulo_helpers import clean_pdf_text 
 import unicodedata
 
 STATIC_DIR = Path("static")
@@ -429,4 +428,5 @@ def generate_pdf_from_df(
 
     pdf.output(out_path)
     return out_path
+
 
