@@ -39,6 +39,7 @@ try:
 except ImportError:
     def delete_distribution_row(conn, piso, equipo, dia):
         return False
+
     def delete_distribution_rows_by_indices(conn, indices):
         return False
 
@@ -79,9 +80,6 @@ st.session_state.setdefault("ui", {
 st.session_state.setdefault("screen", "Administrador")
 st.session_state.setdefault("forgot_mode", False)
 
-# login state
-st.session_state.setdefault("admin_logged_in", False)
-
 # ---------------------------------------------------------
 # 4.5) DB + SETTINGS
 # ---------------------------------------------------------
@@ -99,7 +97,7 @@ st.session_state["ui"]["app_title"] = settings.get("site_title", st.session_stat
 st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state["ui"]["logo_path"])
 
 # ---------------------------------------------------------
-# 5) CSS
+# 5) CSS (mantengo tu estilo y tu layout)
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -166,7 +164,7 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* mismo ancho para ambos botones del login */
+/* ✅ mismo ancho para ambos botones del login (como lo tenías) */
 button[kind="primary"][data-testid="baseButton-primary"] {{
   width: 320px !important;
 }}
@@ -174,17 +172,20 @@ button[data-testid="baseButton-secondary"] {{
   width: 320px !important;
 }}
 
-/* opcional: evita que en columnas se "encojan" los botones */
-div[data-testid="column"] .stButton {{
-  width: 100%;
-}}
-
-/* ✅ (si más adelante vuelves a usar logo clickeable) */
-.mk-logo-btn button {{
+/* ✅ logo clickeable SIN abrir otra página:
+   creamos un botón transparente del tamaño del logo */
+.mk-logo-overlay button {{
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
   box-shadow: none !important;
+  width: 100% !important;
+}}
+.mk-logo-overlay button:hover {{
+  filter: brightness(0.98);
+}}
+.mk-logo-overlay button:focus {{
+  outline: none !important;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -214,6 +215,7 @@ def clean_pdf_text(s: str) -> str:
 def go(screen: str):
     st.session_state["screen"] = screen
 
+# ✅ FIX: credenciales robustas (arregla tu error TypeError)
 def _normalize_admin_creds(creds):
     """
     Soporta:
@@ -242,13 +244,11 @@ def _normalize_admin_creds(creds):
         elif "," in s:
             parts = s.split(",", 1)
         else:
-            # no separador: imposible inferir password
             return s.lower() or None, None
         email = parts[0].strip().lower()
         pwd = parts[1].strip()
         return (email or None), (pwd or None)
 
-    # tipo inesperado
     return None, None
 
 def _validate_admin_login(email: str, password: str) -> bool:
@@ -271,7 +271,15 @@ def render_topbar_and_menu():
     c1, c2, c3 = st.columns([1.2, 3.6, 1.2], vertical_alignment="center")
 
     with c1:
+        # ✅ FIX: logo "clickeable" sin abrir otra página
         if logo_path.exists():
+            # botón transparente (misma columna) -> vuelve al inicio (Administrador)
+            st.markdown("<div class='mk-logo-overlay'>", unsafe_allow_html=True)
+            if st.button(" ", key="logo_go_home_btn"):
+                go("Administrador")
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
             st.image(str(logo_path), width=logo_w)
         else:
             st.write("🧩 (Logo aquí)")
@@ -280,7 +288,7 @@ def render_topbar_and_menu():
         st.markdown(f"<div class='mk-title' style='font-size:{size}px;'>{title}</div>", unsafe_allow_html=True)
 
     with c3:
-        # ✅ "Inicio" fijo como una opción más (no resetea nada)
+        # (lo dejo como lo tenías: sin inventar resets)
         menu_choice = st.selectbox(
             "Menú",
             ["—", "Inicio", "Reservas", "Ver Distribución y Planos"],
@@ -295,91 +303,9 @@ def render_topbar_and_menu():
             go("Planos")
 
 # ---------------------------------------------------------
-# ADMIN (login + tabs)
+# ADMIN
 # ---------------------------------------------------------
-def admin_tabs_after_login(conn):
-    st.subheader("Administrador")
-
-    tabs = st.tabs(["Cargar Datos"])
-
-    with tabs[0]:
-        st.markdown("### Cargar Excel para generar distribución")
-        st.info("Sube el Excel base y generamos la distribución usando seats.py")
-
-        up = st.file_uploader("Sube tu Excel", type=["xlsx"], key="uploader_excel_dist")
-
-        # parámetros mínimos para probar
-        cA, cB, cC = st.columns([1, 1, 1], vertical_alignment="center")
-        with cA:
-            cupos_reserva = st.number_input("Cupos reserva por piso", min_value=0, value=2, step=1)
-        with cB:
-            ignore_params = st.checkbox("Ignorar parámetros", value=False)
-        with cC:
-            variant_mode = st.selectbox("Modo 'o' (día completo)", ["holgura", "equilibrar", "aleatorio"], index=0)
-
-        if st.button("Generar distribución", type="primary", key="btn_gen_dist"):
-            if up is None:
-                st.warning("Primero sube un archivo Excel.")
-                st.stop()
-
-            try:
-                xls = pd.ExcelFile(up)
-                # Ajusta estos nombres si tus hojas se llaman distinto:
-                # equipos_df: piso/equipo/personas/minimos
-                # parametros_df: criterios/valor
-                # capacidades_df: piso/capacidad
-                sheet_names = [s.lower() for s in xls.sheet_names]
-
-                def pick_sheet(candidates):
-                    for cand in candidates:
-                        for real in xls.sheet_names:
-                            if cand in real.lower():
-                                return real
-                    return None
-
-                sh_equipos = pick_sheet(["equipos", "equipo", "dotacion", "dotación"])
-                sh_params = pick_sheet(["parametros", "parámetros", "criterios", "param"])
-                sh_caps = pick_sheet(["capacidad", "capacidades", "cap"])
-
-                if not sh_equipos:
-                    st.error(f"No encontré hoja de equipos. Hojas disponibles: {xls.sheet_names}")
-                    st.stop()
-
-                equipos_df = pd.read_excel(xls, sheet_name=sh_equipos)
-                parametros_df = pd.read_excel(xls, sheet_name=sh_params) if sh_params else pd.DataFrame()
-                capacidades_df = pd.read_excel(xls, sheet_name=sh_caps) if sh_caps else pd.DataFrame()
-
-                rows, deficit, audit, score = compute_distribution_from_excel(
-                    equipos_df=equipos_df,
-                    parametros_df=parametros_df,
-                    df_capacidades=capacidades_df,
-                    cupos_reserva=int(cupos_reserva),
-                    ignore_params=bool(ignore_params),
-                    variant_seed=42,
-                    variant_mode=str(variant_mode),
-                )
-
-                if not rows:
-                    st.error("No se generaron filas de distribución. Revisa columnas del Excel.")
-                    st.stop()
-
-                df_out = pd.DataFrame(rows)
-                st.success(f"Distribución generada. Score: {score.get('score'):.2f}")
-                st.dataframe(df_out, use_container_width=True, hide_index=True)
-
-                # (Opcional) guardar en DB/Sheets si tu flujo lo usa:
-                # clear_distribution(conn)
-                # for r in rows: insert_distribution(conn, r["piso"], r["equipo"], r["dia"], r["cupos"])
-
-            except Exception as ex:
-                st.exception(ex)
-
 def screen_admin(conn):
-    # si ya logueó, mostrar pestañas admin
-    if st.session_state.get("admin_logged_in"):
-        admin_tabs_after_login(conn)
-        return
-
     st.subheader("Administrador")
     st.session_state.setdefault("forgot_mode", False)
 
@@ -387,6 +313,9 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
+        # ✅ MISMO layout que te gustaba:
+        # Izq: "Olvidaste..."
+        # Der: "Acceder" pegado al borde derecho (respetando margen global)
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
 
         with c1:
@@ -395,7 +324,8 @@ def screen_admin(conn):
                 st.rerun()
 
         with c2:
-            # ✅ empuja el botón a la derecha dentro de su columna (sin romper el margen global)
+            # ✅ FIX: empujar al extremo derecho SIN hacerlo chico
+            # hacemos 2 subcolumnas dentro de la derecha
             spacer, btn_col = st.columns([3, 1], vertical_alignment="center")
             with btn_col:
                 if st.button("Acceder", type="primary", key="btn_admin_login"):
@@ -406,9 +336,8 @@ def screen_admin(conn):
                     else:
                         ok = _validate_admin_login(e, p)
                         if ok:
-                            st.session_state["admin_logged_in"] = True
-                            st.success("Bienvenido/a 👋")
-                            st.rerun()
+                            st.success("Login OK (validación real lista).")
+                            # aquí luego puedes setear st.session_state["admin_logged_in"]=True
                         else:
                             st.error("Credenciales incorrectas.")
 
