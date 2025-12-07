@@ -97,9 +97,6 @@ st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state
 
 # ---------------------------------------------------------
 # 5) CSS
-#   - márgenes 5cm iguales
-#   - escala global grande
-#   - sin botón "<<"
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -119,7 +116,7 @@ section.main > div {{
   padding-top: 0rem !important;
 }}
 
-/* márgenes iguales */
+/* márgenes iguales 5cm */
 .block-container {{
   max-width: 100% !important;
   padding-top: 0.75rem !important;
@@ -156,25 +153,11 @@ div[data-baseweb="select"] > div {{
   border-radius: 16px !important;
 }}
 
-/* Topbar */
-.mk-topbar {{
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 18px;
-  margin-top: 8px;
-  margin-bottom: 6px;
-}}
 .mk-title {{
   text-align: center;
   font-weight: 900;
   margin: 0;
   line-height: 1.05;
-}}
-.mk-right {{
-  display:flex;
-  justify-content:flex-end;
-  align-items:center;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -230,7 +213,7 @@ def go(screen: str):
     st.session_state["screen"] = screen
 
 # ---------------------------------------------------------
-# TOPBAR (logo izq, título centro, SELECTBOX "Menú" der)
+# TOPBAR (logo izq, título centro, menú der)
 # ---------------------------------------------------------
 def render_topbar_and_menu():
     logo_path = Path(st.session_state.ui["logo_path"])
@@ -249,7 +232,6 @@ def render_topbar_and_menu():
         st.markdown(f"<div class='mk-title' style='font-size:{size}px;'>{title}</div>", unsafe_allow_html=True)
 
     with c3:
-        # ✅ Cambia “Selecciona” -> “Menú” (label visible)
         menu_choice = st.selectbox(
             "Menú",
             ["—", "Reservas", "Ver Distribución y Planos"],
@@ -263,56 +245,70 @@ def render_topbar_and_menu():
 
 # ---------------------------------------------------------
 # ADMIN (principal)
-#   - Acceder alineado con Olvidaste...
+#   ✅ Acceder alineado al borde derecho de los inputs
 # ---------------------------------------------------------
 def screen_admin(conn):
     st.subheader("Administrador")
     st.session_state.setdefault("forgot_mode", False)
 
-    if not st.session_state["forgot_mode"]:
-        st.text_input("Ingresar correo", key="admin_login_email")
-        st.text_input("Contraseña", type="password", key="admin_login_pass")
+    # Usamos columnas para que "Acceder" quede al borde derecho del bloque de inputs
+    left, right = st.columns([0.86, 0.14], vertical_alignment="bottom")
 
-        c1, c2 = st.columns([3, 1], vertical_alignment="center")
-        with c1:
-            if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
-                st.session_state["forgot_mode"] = True
-                st.rerun()
-        with c2:
-            if st.button("Acceder", type="primary", key="btn_admin_login"):
+    if not st.session_state["forgot_mode"]:
+        with left:
+            st.text_input("Ingresar correo", key="admin_login_email")
+            st.text_input("Contraseña", type="password", key="admin_login_pass")
+
+            # fila inferior: izq "Olvidaste", der vacío (el botón accede va en la otra columna)
+            c1, c2 = st.columns([1, 1], vertical_alignment="center")
+            with c1:
+                if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
+                    st.session_state["forgot_mode"] = True
+                    st.rerun()
+            with c2:
+                st.write("")
+
+        # botón al borde derecho (misma altura visual del bloque inferior)
+        with right:
+            st.markdown("<div style='height: 6px'></div>", unsafe_allow_html=True)
+            if st.button("Acceder", type="primary", key="btn_admin_login", use_container_width=True):
                 e = st.session_state.get("admin_login_email", "").strip()
                 p = st.session_state.get("admin_login_pass", "")
                 if not e or not p:
                     st.warning("Completa correo y contraseña.")
                 else:
                     st.success("Login recibido (validación real pendiente).")
-    else:
-        st.text_input("Correo de acceso", key="admin_reset_email")
-        st.caption("Ingresa el código recibido en tu correo.")
-        st.text_input("Código", key="admin_reset_code")
 
-        c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="center")
-        with c1:
-            if st.button("Volver a Acceso", key="btn_admin_back"):
-                st.session_state["forgot_mode"] = False
-                st.rerun()
-        with c2:
-            if st.button("Enviar código", type="primary", key="btn_admin_send_code"):
+    else:
+        with left:
+            st.text_input("Correo de acceso", key="admin_reset_email")
+            st.caption("Ingresa el código recibido en tu correo.")
+            st.text_input("Código", key="admin_reset_code")
+
+            c1, c2 = st.columns([1, 1], vertical_alignment="center")
+            with c1:
+                if st.button("Volver a Acceso", key="btn_admin_back"):
+                    st.session_state["forgot_mode"] = False
+                    st.rerun()
+            with c2:
+                if st.button("Validar código", type="primary", key="btn_admin_validate"):
+                    c = st.session_state.get("admin_reset_code", "").strip()
+                    if not c:
+                        st.warning("Ingresa el código.")
+                    else:
+                        st.success("Código validado (simulado).")
+
+        with right:
+            st.markdown("<div style='height: 6px'></div>", unsafe_allow_html=True)
+            if st.button("Enviar código", type="primary", key="btn_admin_send_code", use_container_width=True):
                 e = st.session_state.get("admin_reset_email", "").strip()
                 if not e:
                     st.warning("Ingresa tu correo.")
                 else:
                     st.success("Código enviado (simulado).")
-        with c3:
-            if st.button("Validar código", type="primary", key="btn_admin_validate"):
-                c = st.session_state.get("admin_reset_code", "").strip()
-                if not c:
-                    st.warning("Ingresa el código.")
-                else:
-                    st.success("Código validado (simulado).")
 
 # ---------------------------------------------------------
-# RESERVAS (3 pestañas) - placeholders (mantén tu lógica aquí)
+# RESERVAS (placeholder)
 # ---------------------------------------------------------
 def screen_reservas_tabs(conn):
     st.subheader("Reservas")
@@ -325,7 +321,7 @@ def screen_reservas_tabs(conn):
         st.info("Pega aquí tu pantalla completa de 'Mis Reservas y Listados'.")
 
 # ---------------------------------------------------------
-# DESCARGAS: Distribución + Planos
+# DESCARGAS (Distribución/Planos)
 # ---------------------------------------------------------
 def _df_to_xlsx_bytes(df: pd.DataFrame, sheet_name="data") -> bytes:
     output = BytesIO()
