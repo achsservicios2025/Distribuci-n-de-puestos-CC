@@ -1157,6 +1157,8 @@ def render_confirm_delete_dialog(conn):
                         payload["sala"],
                         inicio
                     )
+                
+                    st.
                 st.session_state.pop("confirm_delete", None)
                 if ok:
                     st.success("Eliminada")
@@ -3084,6 +3086,7 @@ elif menu == "Administrador":
                 else:
                     st.success(f"✅ {msg} (Error al eliminar zonas)")
                 st.rerun()
+
 
 
 
