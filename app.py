@@ -97,8 +97,8 @@ st.session_state["ui"]["logo_path"] = settings.get("logo_path", st.session_state
 
 # ---------------------------------------------------------
 # 5) CSS
-#   ✅ único cambio: botón "Acceder" mismo tamaño que "Olvidaste..."
-#      (quitamos use_container_width y definimos ancho automático)
+#   ✅ "Acceder" mismo ancho que "Olvidaste..." (fijo)
+#   ✅ "Acceder" alineado a la derecha
 # ---------------------------------------------------------
 st.markdown(f"""
 <style>
@@ -165,10 +165,24 @@ div[data-baseweb="select"] > div {{
   line-height: 1.05;
 }}
 
-/* ✅ fuerza que SOLO el botón Acceder NO se estire */
-div[data-testid="column"]:has(button[kind="primary"]) .stButton button {{
-  width: auto !important;
-  min-width: 0 !important;
+/* ✅ Alinear la columna derecha al borde derecho */
+.mk-right {{
+  display: flex;
+  justify-content: flex-end;
+}}
+
+/*
+✅ Forzamos que "Acceder" mida EXACTAMENTE lo mismo que "Olvidaste tu contraseña".
+Ajusta este ancho si cambias el texto del botón izquierdo.
+Con los tamaños actuales, 320px calza bien para ambos.
+*/
+button[kind="primary"][data-testid="baseButton-primary"] {{
+  width: 320px !important;
+}}
+
+/* También dejamos el botón izquierdo con el mismo ancho */
+button[data-testid="baseButton-secondary"] {{
+  width: 320px !important;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -240,13 +254,14 @@ def screen_admin(conn):
         st.text_input("Ingresar correo", key="admin_login_email")
         st.text_input("Contraseña", type="password", key="admin_login_pass")
 
-        c1, c2 = st.columns([3, 1], vertical_alignment="center")
+        # ✅ Misma fila. Izq botón izquierdo, der botón derecho pegado a borde.
+        c1, c2 = st.columns([1, 1], vertical_alignment="center")
         with c1:
             if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
                 st.session_state["forgot_mode"] = True
                 st.rerun()
         with c2:
-            # ✅ sin use_container_width -> mismo tamaño "natural" que el otro botón
+            st.markdown("<div class='mk-right'>", unsafe_allow_html=True)
             if st.button("Acceder", type="primary", key="btn_admin_login"):
                 e = st.session_state.get("admin_login_email", "").strip()
                 p = st.session_state.get("admin_login_pass", "")
@@ -254,6 +269,8 @@ def screen_admin(conn):
                     st.warning("Completa correo y contraseña.")
                 else:
                     st.success("Login recibido (validación real pendiente).")
+            st.markdown("</div>", unsafe_allow_html=True)
+
     else:
         st.text_input("Correo de acceso", key="admin_reset_email")
         st.caption("Ingresa el código recibido en tu correo.")
