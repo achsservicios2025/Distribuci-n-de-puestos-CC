@@ -1,8 +1,10 @@
+# modules/zones.py
 import json
 import os
+import re
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple, List
 
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
@@ -10,17 +12,21 @@ from PIL import Image, ImageDraw, ImageFont, ImageColor
 # Paths
 # ---------------------------------------------------------
 DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 ZONES_FILE = DATA_DIR / "zones.json"
 
-PLANOS_DIR = Path("planos")
+# ✅ OJO: en tu app los planos están en "modules/planos"
+PLANOS_DIR = Path("modules/planos")
 COLORED_DIR = Path("planos_coloreados")
-PLANOS_DIR.mkdir(exist_ok=True)
-COLORED_DIR.mkdir(exist_ok=True)
+PLANOS_DIR.mkdir(parents=True, exist_ok=True)
+COLORED_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------
-# IO
+# IO (persistir zonas)
+# Formato recomendado:
+#   zones[piso_label] = { "version": "...", "objects": [...] }  (json de Fabric.js)
+#   o legacy: zones[piso_label] = [ {left,top,width,height,color,equipo,dia}, ... ]
 # ---------------------------------------------------------
 def load_zones() -> dict:
     if not ZONES_FILE.exists():
@@ -32,7 +38,6 @@ def load_zones() -> dict:
     except Exception:
         return {}
 
-
 def save_zones(data: dict) -> bool:
     try:
         with open(ZONES_FILE, "w", encoding="utf-8") as f:
@@ -41,9 +46,8 @@ def save_zones(data: dict) -> bool:
     except Exception:
         return False
 
-
 # ---------------------------------------------------------
-# Helpers (robustos / tolerantes)
+# Helpers
 # ---------------------------------------------------------
 def _safe_int(x, default=0) -> int:
     try:
@@ -51,69 +55,65 @@ def _safe_int(x, default=0) -> int:
     except Exception:
         return default
 
-
 def _safe_float(x, default=0.0) -> float:
     try:
-        return float(str(x).replace(",", "."))
+        return float(str(x).replace(",", ".")))
     except Exception:
         return default
 
+def _normalize_piso_label(piso: str) -> str:
+    s = str(piso or "").strip()
+    if not s:
+        return "Piso 1"
+    if s.lower().startswith("piso"):
+        return "Piso " + s[4:].strip()
+    m = re.findall(r"\d+", s)
+    return f"Piso {m[0]}" if m else s
 
-def _hex_to_rgba(hex_color: str, alpha=90):
+def _piso_num_from_label(piso_label: str) -> str:
+    s = str(piso_label or "").strip()
+    m = re.findall(r"\d+", s)
+    return m[0] if m else "1"
+
+def _rgba_from_any(color: str, default=(0, 160, 74, 90)) -> Tuple[int, int, int, int]:
+    """
+    Acepta:
+      - "rgba(r,g,b,a)" con a en [0..1] o [0..255]
+      - "#RRGGBB" / "red" / etc
+    Devuelve RGBA con alpha 0..255
+    """
     try:
-        r, g, b = ImageColor.getrgb(str(hex_color))
-        return (r, g, b, int(alpha))
+        c = str(color or "").strip()
+        if not c:
+            return default
+
+        if c.lower().startswith("rgba"):
+            inside = c[c.find("(") + 1 : c.rfind(")")]
+            parts = [p.strip() for p in inside.split(",")]
+            if len(parts) >= 4:
+                r = int(float(parts[0]))
+                g = int(float(parts[1]))
+                b = int(float(parts[2]))
+                a_raw = float(parts[3])
+                a = int(round(a_raw * 255)) if a_raw <= 1.0 else int(round(a_raw))
+                a = max(0, min(255, a))
+                return (r, g, b, a)
+
+        # hex/nombre
+        r, g, b = ImageColor.getrgb(c)
+        return (r, g, b, default[3])
     except Exception:
-        # verde ACHS-ish fallback
-        return (0, 160, 74, int(alpha))
-
-
-def _normalize_piso_num(piso_name: str) -> str:
-    s = str(piso_name or "").strip()
-    digits = "".join(ch for ch in s if ch.isdigit())
-    return digits or "1"
-
-
-def _normalize_day_slug(dia_name: str) -> str:
-    s = (dia_name or "").strip().lower()
-    trans = str.maketrans({"á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u"})
-    return s.translate(trans).replace(" ", "")
-
-
-def _find_plan_path(piso_num: str) -> Optional[Path]:
-    # acepta: piso1.png / piso 1.png / piso_1.png / Piso1.png + jpg/jpeg
-    candidates = [
-        PLANOS_DIR / f"piso{piso_num}.png",
-        PLANOS_DIR / f"piso{piso_num}.jpg",
-        PLANOS_DIR / f"piso{piso_num}.jpeg",
-        PLANOS_DIR / f"piso {piso_num}.png",
-        PLANOS_DIR / f"piso {piso_num}.jpg",
-        PLANOS_DIR / f"piso {piso_num}.jpeg",
-        PLANOS_DIR / f"piso_{piso_num}.png",
-        PLANOS_DIR / f"piso_{piso_num}.jpg",
-        PLANOS_DIR / f"piso_{piso_num}.jpeg",
-        PLANOS_DIR / f"Piso{piso_num}.png",
-        PLANOS_DIR / f"Piso{piso_num}.jpg",
-        PLANOS_DIR / f"Piso{piso_num}.jpeg",
-        PLANOS_DIR / f"Piso {piso_num}.png",
-        PLANOS_DIR / f"Piso {piso_num}.jpg",
-        PLANOS_DIR / f"Piso {piso_num}.jpeg",
-    ]
-    return next((p for p in candidates if p.exists()), None)
-
+        return default
 
 def _get_font(font_name: str, size: int) -> ImageFont.ImageFont:
-    """
-    En servidores Linux muchas fuentes no están. Intentamos:
-    - si font_name es path o nombre ttf
-    - DejaVuSans.ttf (suele venir)
-    - fallback default
-    """
     size = max(8, int(size or 12))
     candidates = []
     if font_name:
         candidates.append(str(font_name))
+
+    # nombres típicos que suelen existir
     candidates.extend(["DejaVuSans.ttf", "Arial.ttf", "arial.ttf"])
+
     for fn in candidates:
         try:
             return ImageFont.truetype(fn, size)
@@ -121,8 +121,7 @@ def _get_font(font_name: str, size: int) -> ImageFont.ImageFont:
             continue
     return ImageFont.load_default()
 
-
-def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
+def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
     if not text:
         return (0, 0)
     try:
@@ -131,387 +130,230 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
     except Exception:
         return (len(text) * 7, 12)
 
+# ---------------------------------------------------------
+# Planos: buscar imagen del piso
+# ---------------------------------------------------------
+def _list_plan_images() -> List[Path]:
+    patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.PNG", "*.JPG", "*.JPEG", "*.WEBP"]
+    imgs: List[Path] = []
+    for pat in patterns:
+        imgs.extend(sorted(PLANOS_DIR.glob(pat)))
+    return imgs
 
-def _x_by_align(total_w: int, item_w: int, align: str, pad: int) -> int:
-    a = (align or "").strip().lower()
-    if a in ("izquierda", "left"):
-        return pad
-    if a in ("derecha", "right"):
-        return max(pad, total_w - item_w - pad)
-    return max(pad, (total_w - item_w) // 2)
-
-
-def _load_logo_image(logo_source, target_width: int) -> Optional[Image.Image]:
+def _find_plan_path_by_piso_label(piso_label: str) -> Optional[Path]:
     """
-    logo_source puede ser:
-    - bytes (logo base64 decodificado desde DB)
-    - path str
-    - None
+    Heurística:
+      - si el nombre del archivo contiene el número del piso → elige ese
+      - si no, devuelve el primero
     """
-    if not logo_source:
+    imgs = _list_plan_images()
+    if not imgs:
         return None
-    try:
-        if isinstance(logo_source, (bytes, bytearray)):
-            img = Image.open(BytesIO(logo_source)).convert("RGBA")
+
+    piso_num = _piso_num_from_label(piso_label)
+    # match "1" como palabra o incluido
+    hit = next((p for p in imgs if re.search(rf"\b{re.escape(piso_num)}\b", p.stem)), None)
+    if hit:
+        return hit
+    hit2 = next((p for p in imgs if piso_num in p.stem), None)
+    return hit2 or imgs[0]
+
+# ---------------------------------------------------------
+# Fabric.js (streamlit-drawable-canvas) → lista de "shapes"
+# ---------------------------------------------------------
+def _fabric_objects(zones_json: dict) -> List[dict]:
+    if not zones_json or not isinstance(zones_json, dict):
+        return []
+    objs = zones_json.get("objects")
+    return objs if isinstance(objs, list) else []
+
+def _extract_shapes_from_fabric(zones_json: dict) -> List[dict]:
+    """
+    Devuelve shapes normalizados:
+      {type, left, top, width, height, fill_rgba, stroke_rgba, ...}
+    Soporta: rect, circle, triangle
+    """
+    out: List[dict] = []
+    for o in _fabric_objects(zones_json):
+        t = str(o.get("type", "")).lower()
+        left = float(o.get("left", 0) or 0)
+        top = float(o.get("top", 0) or 0)
+
+        fill = _rgba_from_any(o.get("fill"), default=(0, 160, 74, 90))
+        stroke = _rgba_from_any(o.get("stroke"), default=(0, 0, 0, 140))
+        stroke_width = _safe_int(o.get("strokeWidth", 2), 2)
+
+        if t == "rect":
+            w = float(o.get("width", 0) or 0) * float(o.get("scaleX", 1) or 1)
+            h = float(o.get("height", 0) or 0) * float(o.get("scaleY", 1) or 1)
+            out.append({
+                "type": "rect",
+                "left": left,
+                "top": top,
+                "width": w,
+                "height": h,
+                "fill_rgba": fill,
+                "stroke_rgba": stroke,
+                "stroke_width": stroke_width,
+            })
+        elif t == "circle":
+            # fabric circle: radius, scaleX/scaleY
+            r = float(o.get("radius", 0) or 0)
+            sx = float(o.get("scaleX", 1) or 1)
+            sy = float(o.get("scaleY", 1) or 1)
+            out.append({
+                "type": "circle",
+                "left": left,
+                "top": top,
+                "radius_x": r * sx,
+                "radius_y": r * sy,
+                "fill_rgba": fill,
+                "stroke_rgba": stroke,
+                "stroke_width": stroke_width,
+            })
+        elif t == "triangle":
+            w = float(o.get("width", 0) or 0) * float(o.get("scaleX", 1) or 1)
+            h = float(o.get("height", 0) or 0) * float(o.get("scaleY", 1) or 1)
+            out.append({
+                "type": "triangle",
+                "left": left,
+                "top": top,
+                "width": w,
+                "height": h,
+                "fill_rgba": fill,
+                "stroke_rgba": stroke,
+                "stroke_width": stroke_width,
+            })
         else:
-            p = str(logo_source)
-            if not os.path.exists(p):
-                return None
-            img = Image.open(p).convert("RGBA")
-        w = max(1, int(target_width))
-        asp = img.height / max(1, img.width)
-        h = max(1, int(round(w * asp)))
-        img = img.resize((w, h), Image.Resampling.LANCZOS)
+            # ignoramos otras cosas (text, line, etc)
+            continue
+
+    return out
+
+# ---------------------------------------------------------
+# Header/Título (simple, como lo que usa el nuevo App)
+# ---------------------------------------------------------
+def _draw_title_overlay(img: Image.Image, title: str, font_name: str = "DejaVuSans.ttf", font_size: int = 28) -> Image.Image:
+    if not title:
         return img
-    except Exception:
-        return None
 
+    img = img.convert("RGBA")
+    overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
 
-# ---------------------------------------------------------
-# ZONE field compatibility
-# ---------------------------------------------------------
-def _zone_day(z: dict) -> str:
-    for k in ("dia", "Día", "day"):
-        if k in z and str(z[k]).strip():
-            return str(z[k]).strip()
-    return ""
+    font = _get_font(font_name, int(font_size or 28))
+    tw, th = _text_size(draw, title, font)
+    pad = 16
 
+    # caja semitransparente arriba centrada
+    box_w = min(img.size[0] - 2 * pad, tw + 2 * pad)
+    box_h = th + 2 * pad
+    x0 = (img.size[0] - box_w) // 2
+    y0 = pad
+    x1 = x0 + box_w
+    y1 = y0 + box_h
 
-def _zone_team(z: dict) -> str:
-    for k in ("equipo", "team", "Equipo"):
-        if k in z and str(z[k]).strip():
-            return str(z[k]).strip()
-    return ""
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=16, fill=(255, 255, 255, 180), outline=(0, 0, 0, 40), width=2)
+    tx = x0 + (box_w - tw) // 2
+    ty = y0 + (box_h - th) // 2
+    draw.text((tx, ty), title, font=font, fill=(0, 0, 0, 230))
 
-
-def _zone_color(z: dict) -> str:
-    return str(z.get("color") or z.get("stroke") or "#00A04A")
-
-
-def _zone_rect(z: dict):
-    # soporta left/top/width/height y legacy x/y/w/h
-    if any(k in z for k in ("left", "top", "width", "height")):
-        x = _safe_float(z.get("left", 0), 0.0)
-        y = _safe_float(z.get("top", 0), 0.0)
-        w = _safe_float(z.get("width", 0), 0.0)
-        h = _safe_float(z.get("height", 0), 0.0)
-        return x, y, w, h
-    x = _safe_float(z.get("x", 0), 0.0)
-    y = _safe_float(z.get("y", 0), 0.0)
-    w = _safe_float(z.get("w", 0), 0.0)
-    h = _safe_float(z.get("h", 0), 0.0)
-    return x, y, w, h
-
+    return Image.alpha_composite(img, overlay)
 
 # ---------------------------------------------------------
-# Header / Legend renderer (config desde UI)
-# ---------------------------------------------------------
-def _draw_header(width: int, cfg: dict, logo_source=None) -> Image.Image:
-    """
-    cfg soporta (nombres amigables + compat):
-      - bg_color: "#FFFFFF"
-
-      - show_logo: bool
-      - logo_position: Izquierda/Centro/Derecha
-      - logo_width: int
-
-      - show_title: bool
-      - title_text: str
-      - title_align: Izquierda/Centro/Derecha
-      - title_font: str (ttf o nombre)
-      - title_font_size: int
-      - title_color: "#000000"
-
-      - show_subtitle: bool (opcional)  (si no viene, se inferirá por texto)
-      - subtitle_text: str
-      - subtitle_align: Izquierda/Centro/Derecha
-      - subtitle_font: str
-      - subtitle_font_size: int
-      - subtitle_color: "#666666"
-    """
-    cfg = cfg or {}
-    bg = cfg.get("bg_color", "#FFFFFF")
-
-    show_logo = bool(cfg.get("show_logo", cfg.get("use_logo", False)))
-    logo_pos = cfg.get("logo_position", cfg.get("logo_align", "Izquierda"))
-    logo_w = _safe_int(cfg.get("logo_width", 140), 140)
-
-    show_title = bool(cfg.get("show_title", True))
-    title_text = str(cfg.get("title_text", "") or "")
-    title_align = cfg.get("title_align", cfg.get("alignment", "Centro"))
-    title_font = cfg.get("title_font", "DejaVuSans.ttf")
-    title_size = _safe_int(cfg.get("title_font_size", cfg.get("title_size", 22)), 22)
-    title_color = cfg.get("title_color", "#000000")
-
-    subtitle_text = str(cfg.get("subtitle_text", "") or "")
-    show_subtitle = bool(cfg.get("show_subtitle", True if subtitle_text else False))
-    subtitle_align = cfg.get("subtitle_align", "Centro")
-    subtitle_font = cfg.get("subtitle_font", "DejaVuSans.ttf")
-    subtitle_size = _safe_int(cfg.get("subtitle_font_size", cfg.get("subtitle_size", 14)), 14)
-    subtitle_color = cfg.get("subtitle_color", "#666666")
-
-    pad_x = 30
-    pad_y = 18
-    gap = 10
-
-    # medir textos
-    tmp = Image.new("RGB", (width, 10), bg)
-    d = ImageDraw.Draw(tmp)
-    font_t = _get_font(title_font, title_size)
-    font_s = _get_font(subtitle_font, subtitle_size)
-
-    tw, th = _text_size(d, title_text, font_t) if (show_title and title_text) else (0, 0)
-    sw, sh = _text_size(d, subtitle_text, font_s) if (show_subtitle and subtitle_text) else (0, 0)
-
-    # cargar logo
-    logo_img = _load_logo_image(logo_source, logo_w) if show_logo else None
-    logo_h = logo_img.height if logo_img else 0
-
-    # altura contenido
-    content_h = 0
-    if logo_img:
-        content_h += logo_h + gap
-    if show_title and title_text:
-        content_h += th + (gap if (show_subtitle and subtitle_text) else 0)
-    if show_subtitle and subtitle_text:
-        content_h += sh
-
-    header_h = max(110, content_h + pad_y * 2)
-    header = Image.new("RGB", (width, header_h), bg)
-    draw = ImageDraw.Draw(header)
-
-    y = (header_h - content_h) // 2
-
-    if logo_img:
-        lx = _x_by_align(width, logo_img.width, logo_pos, pad_x)
-        header.paste(logo_img, (lx, y), logo_img)
-        y += logo_h + gap
-
-    if show_title and title_text:
-        x = _x_by_align(width, tw, title_align, pad_x)
-        draw.text((x, y), title_text, font=font_t, fill=title_color)
-        y += th + (gap if (show_subtitle and subtitle_text) else 0)
-
-    if show_subtitle and subtitle_text:
-        x = _x_by_align(width, sw, subtitle_align, pad_x)
-        draw.text((x, y), subtitle_text, font=font_s, fill=subtitle_color)
-
-    return header
-
-
-def _draw_legend(width: int, legend_items: list, cfg: dict) -> Optional[Image.Image]:
-    """
-    legend_items: [(equipo, color_hex, cupos_int), ...]
-    cfg:
-      - show_legend: bool
-      - legend_align: Izquierda/Centro/Derecha
-      - legend_font: str
-      - legend_size: int
-      - bg_color
-      - legend_title_text (opcional)
-      - legend_title_size (opcional)
-    """
-    cfg = cfg or {}
-    show_legend = bool(cfg.get("show_legend", cfg.get("use_legend", True)))
-    if not show_legend or not legend_items:
-        return None
-
-    bg = cfg.get("bg_color", "#FFFFFF")
-    align = cfg.get("legend_align", "Izquierda")
-    font_name = cfg.get("legend_font", "DejaVuSans.ttf")
-    size = _safe_int(cfg.get("legend_size", 14), 14)
-
-    title_text = str(cfg.get("legend_title_text", "Leyenda") or "Leyenda")
-    title_size = _safe_int(cfg.get("legend_title_size", int(size * 1.3)), int(size * 1.3))
-
-    pad = 24
-    row_h = max(36, int(size * 2.4))
-    circ = max(10, int(size * 0.9))
-
-    title_font = _get_font(font_name, title_size)
-    item_font = _get_font(font_name, size)
-
-    # columnas dinámicas
-    n = len(legend_items)
-    cols = 1
-    if n > 8: cols = 2
-    if n > 16: cols = 3
-    rows = (n + cols - 1) // cols
-    col_w = int((width - 2 * pad) / cols)
-
-    tmp = Image.new("RGB", (width, 10), bg)
-    d = ImageDraw.Draw(tmp)
-    t_w, t_h = _text_size(d, title_text, title_font)
-
-    total_h = pad + t_h + pad + rows * row_h + pad
-    img = Image.new("RGB", (width, total_h), bg)
-    draw = ImageDraw.Draw(img)
-
-    tx = _x_by_align(width, t_w, align, pad)
-    draw.text((tx, pad), title_text, font=title_font, fill="#000000")
-
-    start_y = pad + t_h + pad
-
-    for i, (team, color, cupos) in enumerate(legend_items):
-        r = i // cols
-        c = i % cols
-        x0 = pad + c * col_w
-        y0 = start_y + r * row_h
-
-        label = f"{team} ({int(cupos)})"
-
-        tmp2 = Image.new("RGB", (10, 10), bg)
-        d2 = ImageDraw.Draw(tmp2)
-        lbl_w, _ = _text_size(d2, label, item_font)
-        item_w = (circ * 2) + 12 + lbl_w
-
-        a = str(align).lower()
-        if a in ("derecha", "right"):
-            x_item = x0 + col_w - item_w
-        elif a in ("centro", "center"):
-            x_item = x0 + (col_w - item_w) // 2
-        else:
-            x_item = x0
-
-        draw.ellipse(
-            [x_item, y0 + 4, x_item + circ * 2, y0 + 4 + circ * 2],
-            fill=str(color),
-            outline="#000000",
-            width=2,
-        )
-        draw.text((x_item + circ * 2 + 12, y0 + 2), label, font=item_font, fill="#000000")
-
-    return img
-
-
-# ---------------------------------------------------------
-# Main render
+# Public API: generate_colored_plan (para el nuevo App)
 # ---------------------------------------------------------
 def generate_colored_plan(
-    piso_name: str,
-    dia_name: str,
-    seat_counts_dict: dict,
-    output_format: str = "PNG",
-    header_config: Optional[dict] = None,
-    logo_source=None,
-):
+    base_image_path: str,
+    zones_json: dict,
+    title: Optional[str] = None,
+    title_font: str = "DejaVuSans.ttf",
+    title_size: int = 28,
+) -> Image.Image:
     """
-    Genera un PNG/PDF combinado:
-      Header (título/logo opcional) + Plano con rectángulos + Leyenda (opcional)
+    Genera una PIL.Image con:
+      - base (plano) + overlay (formas transparentes)
+      - título opcional (overlay superior)
 
-    - Filtra zonas por día (dia_name) si la zona tiene dia/day.
-    - seat_counts_dict se usa para cupos en la leyenda:
-        seat_counts_dict[equipo] = cupos
-    - logo_source: bytes (logo cargado en DB) o path str
+    Esto calza con lo que te dejé en el App.py:
+      generate_colored_plan(base_image_path=..., zones_json=..., title=...)
     """
-    zones_data = load_zones()
-    if not zones_data:
-        return None
+    if not base_image_path:
+        raise ValueError("base_image_path vacío")
 
-    piso_key = str(piso_name).strip()
-    floor_zones = zones_data.get(piso_key) or []
-    if not floor_zones:
-        return None
+    p = Path(str(base_image_path))
+    if not p.exists():
+        raise FileNotFoundError(f"No existe el plano: {p}")
 
-    piso_num = _normalize_piso_num(piso_key)
-    plan_path = _find_plan_path(piso_num)
-    if not plan_path:
-        return None
-
-    cfg = header_config or {}
-
-    dia_target = str(dia_name).strip()
-    filtered = []
-    for z in floor_zones:
-        z_dia = _zone_day(z)
-        # si la zona tiene día, se respeta; si no, aplica a todos
-        if z_dia and dia_target and z_dia != dia_target:
-            continue
-        filtered.append(z)
-
-    if not filtered:
-        return None
-
-    # Plano base
-    base = Image.open(plan_path).convert("RGBA")
-
-    # Overlay con rectángulos
+    base = Image.open(p).convert("RGBA")
     overlay = Image.new("RGBA", base.size, (255, 255, 255, 0))
-    d = ImageDraw.Draw(overlay)
+    draw = ImageDraw.Draw(overlay)
 
-    # permitimos configurar opacidad y borde desde cfg (opcional)
-    zone_alpha = _safe_int(cfg.get("zone_alpha", 90), 90)
-    border_color = cfg.get("zone_border_color", "#000000")
-    border_width = _safe_int(cfg.get("zone_border_width", 2), 2)
+    shapes = _extract_shapes_from_fabric(zones_json)
 
-    for z in filtered:
-        x, y, w, h = _zone_rect(z)
-        color = _zone_color(z)
+    for s in shapes:
+        t = s["type"]
+        sw = int(s.get("stroke_width", 2))
 
-        x2 = x + w
-        y2 = y + h
+        if t == "rect":
+            x0 = int(round(s["left"]))
+            y0 = int(round(s["top"]))
+            x1 = int(round(s["left"] + s["width"]))
+            y1 = int(round(s["top"] + s["height"]))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            draw.rectangle([x0, y0, x1, y1], fill=s["fill_rgba"], outline=s["stroke_rgba"], width=sw)
 
-        # clamp a imagen
-        x = max(0, min(base.width, int(round(x))))
-        y = max(0, min(base.height, int(round(y))))
-        x2 = max(0, min(base.width, int(round(x2))))
-        y2 = max(0, min(base.height, int(round(y2))))
+        elif t == "circle":
+            # fabric circle uses left/top as bounding box start of circle object
+            rx = float(s.get("radius_x", 0))
+            ry = float(s.get("radius_y", 0))
+            x0 = int(round(s["left"]))
+            y0 = int(round(s["top"]))
+            x1 = int(round(s["left"] + 2 * rx))
+            y1 = int(round(s["top"] + 2 * ry))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            draw.ellipse([x0, y0, x1, y1], fill=s["fill_rgba"], outline=s["stroke_rgba"], width=sw)
 
-        if x2 <= x or y2 <= y:
-            continue
+        elif t == "triangle":
+            x0 = float(s["left"])
+            y0 = float(s["top"])
+            w = float(s["width"])
+            h = float(s["height"])
+            if w <= 0 or h <= 0:
+                continue
+            # triángulo hacia arriba
+            p1 = (int(round(x0 + w / 2)), int(round(y0)))
+            p2 = (int(round(x0)), int(round(y0 + h)))
+            p3 = (int(round(x0 + w)), int(round(y0 + h)))
+            draw.polygon([p1, p2, p3], fill=s["fill_rgba"], outline=s["stroke_rgba"])
+            if sw > 1:
+                # borde "manual" para que se vea más
+                draw.line([p1, p2, p3, p1], fill=s["stroke_rgba"], width=sw)
 
-        fill = _hex_to_rgba(color, alpha=zone_alpha)
-        d.rectangle([x, y, x2, y2], fill=fill, outline=str(border_color), width=border_width)
+    out = Image.alpha_composite(base, overlay)
 
-    map_img = Image.alpha_composite(base, overlay).convert("RGB")
-    fw = map_img.width
+    if title:
+        out = _draw_title_overlay(out, title=str(title), font_name=title_font, font_size=int(title_size or 28))
 
-    # Header
-    header_img = _draw_header(fw, cfg, logo_source)
+    return out.convert("RGB")
 
-    # Legend items (únicos por equipo)
-    uniq = {}
-    for z in filtered:
-        team = _zone_team(z)
-        if not team:
-            continue
-        if team not in uniq:
-            uniq[team] = _zone_color(z)
+# ---------------------------------------------------------
+# (Opcional) utilidades para que el editor pueda persistir por piso
+# ---------------------------------------------------------
+def save_zones_for_floor(piso_label: str, zones_json: dict) -> bool:
+    """
+    Guarda el json completo (Fabric) por piso:
+      zones["Piso 1"] = {version, objects...}
+    """
+    piso_label = _normalize_piso_label(piso_label)
+    data = load_zones()
+    data[piso_label] = zones_json if isinstance(zones_json, dict) else {"version": "4.4.0", "objects": []}
+    return save_zones(data)
 
-    legend_items = []
-    for team, color in uniq.items():
-        cupos = _safe_int(seat_counts_dict.get(team, 0), 0)
-        legend_items.append((team, color, cupos))
-    legend_items.sort(key=lambda x: x[0].lower())
-
-    legend_img = _draw_legend(fw, legend_items, cfg)
-
-    # Merge vertical
-    parts = [header_img, map_img]
-    if legend_img is not None:
-        parts.append(legend_img)
-
-    total_h = sum(p.height for p in parts)
-    final_bg = cfg.get("bg_color", "#FFFFFF")
-    final = Image.new("RGB", (fw, total_h), final_bg)
-
-    y = 0
-    for p in parts:
-        final.paste(p, (0, y))
-        y += p.height
-
-    # Guardar
-    ext = "pdf" if str(output_format).upper() == "PDF" else "png"
-    ds = _normalize_day_slug(dia_name)
-    out_name = f"piso_{piso_num}_{ds}_combined.{ext}"
-    out_path = COLORED_DIR / out_name
-
-    try:
-        if ext == "pdf":
-            # PIL PDF size = image size; resolution mejora nitidez
-            final.save(out_path, format="PDF", resolution=float(cfg.get("pdf_resolution", 150.0)))
-        else:
-            final.save(out_path, format="PNG", optimize=True)
-        return out_path
-    except Exception:
-        return None
+def get_zones_for_floor(piso_label: str) -> dict:
+    piso_label = _normalize_piso_label(piso_label)
+    data = load_zones()
+    z = data.get(piso_label)
+    return z if isinstance(z, dict) else {"version": "4.4.0", "objects": []}
