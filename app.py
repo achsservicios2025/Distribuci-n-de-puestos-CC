@@ -86,11 +86,24 @@ st.session_state.setdefault("is_admin", False)
 # ---------------------------------------------------------
 # 4.5) DB + SETTINGS
 # ---------------------------------------------------------
+def _conn_debug_panel(err: Exception):
+    st.error("❌ No pude conectar a Google Sheets.")
+    st.write("Checklist rápida:")
+    st.write("- En Streamlit Cloud → App → Settings → Secrets, existe **[sheets] sheet_name**")
+    st.write("- El Google Sheet está **compartido** con el service account (client_email)")
+    st.write("- El sheet_name coincide exacto con el nombre del archivo en Drive (o usa el ID)")
+    st.divider()
+    st.write("Error capturado:")
+    st.exception(err)
+
 try:
     conn = get_conn()
 except Exception as e:
-    st.error("❌ No pude conectar a Google Sheets. Revisa Secrets (sheet_name y gcp_service_account).")
-    st.exception(e)
+    _conn_debug_panel(e)
+    st.stop()
+
+if conn is None:
+    st.error("❌ get_conn() devolvió None (conexión inválida).")
     st.stop()
 
 if "db_initialized" not in st.session_state:
@@ -616,25 +629,21 @@ def admin_panel(conn):
                         st.warning("Primero genera una distribución para poder guardarla.")
                     else:
                         try:
-                            # ✅ versión segura: clear + insert por fila (compatible con tu database.py original)
-                            clear_distribution(conn)
-                            for r in rows:
-                                piso_db = _piso_to_label(r.get("piso"))
-                                dia_db = str(r.get("dia", "")).strip()
-                                equipo_db = str(r.get("equipo", "")).strip()
-                                cupos_db = int(float(r.get("cupos", 0) or 0))
-                                insert_distribution(conn, piso_db, dia_db, equipo_db, cupos_db, r.get("% uso diario", None))
+                            rows = st.session_state.get("pending_distribution_rows", [])
+                            if not rows:
+                                st.warning("Primero genera una distribución para poder guardarla.")
+                            else:
+                                # Opción A: guardar directo (tu database.py espera lista de dicts)
+                                insert_distribution(conn, rows)
 
-                            st.success("✅ Distribución guardada en Google Sheets (DB).")
-                            st.session_state["last_distribution_rows"] = rows
-                            st.session_state["last_distribution_deficit"] = st.session_state.get("pending_distribution_deficit", [])
-                            st.session_state["last_distribution_audit"] = st.session_state.get("pending_distribution_audit", {})
-                            st.session_state["last_distribution_score"] = st.session_state.get("pending_distribution_score", {})
+                                st.success("✅ Distribución guardada en Google Sheets (DB).")
+                                st.session_state["last_distribution_rows"] = rows
+                                st.session_state["last_distribution_deficit"] = st.session_state.get("pending_distribution_deficit", [])
+                                st.session_state["last_distribution_audit"] = st.session_state.get("pending_distribution_audit", {})
+                                st.session_state["last_distribution_score"] = st.session_state.get("pending_distribution_score", {})
                         except Exception as e:
                             st.error(f"No pude guardar en DB: {e}")
                             return
-
-                # ... (tu resto de vista previa sigue igual) ...
 
             except Exception as e:
                 st.error(f"No se pudo leer el Excel: {e}")
@@ -880,4 +889,5 @@ def admin_panel(conn):
                             st.rerun()
                     except Exception as e:
                         st.error(f"No pude guardar zona: {e}")
+
 
