@@ -86,7 +86,12 @@ st.session_state.setdefault("is_admin", False)
 # ---------------------------------------------------------
 # 4.5) DB + SETTINGS
 # ---------------------------------------------------------
-conn = get_conn()
+try:
+    conn = get_conn()
+except Exception as e:
+    st.error("❌ No pude conectar a Google Sheets. Revisa Secrets (sheet_name y gcp_service_account).")
+    st.exception(e)
+    st.stop()
 
 if "db_initialized" not in st.session_state:
     with st.spinner("Conectando a Google Sheets..."):
@@ -875,3 +880,4 @@ def admin_panel(conn):
                             st.rerun()
                     except Exception as e:
                         st.error(f"No pude guardar zona: {e}")
+
