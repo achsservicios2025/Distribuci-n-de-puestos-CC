@@ -174,12 +174,11 @@ def _list_plan_images() -> List[Path]:
         imgs.extend(sorted(PLANOS_DIR.glob(pat)))
     return imgs
 
-
 def find_plan_path_by_piso_label(piso_label: str) -> Optional[Path]:
     """
-    Heurística:
-      - si el nombre del archivo contiene el número del piso → elige ese
-      - si no, devuelve el primero
+    Heurística robusta:
+      - soporta nombres tipo: piso1.png, piso_1.png, piso 1.png, Piso1.png...
+      - si no encuentra match, devuelve el primer plano disponible
     """
     imgs = _list_plan_images()
     if not imgs:
@@ -189,12 +188,15 @@ def find_plan_path_by_piso_label(piso_label: str) -> Optional[Path]:
     m = re.findall(r"\d+", piso_label)
     piso_num = m[0] if m else "1"
 
-    hit = next((p for p in imgs if re.search(rf"\b{re.escape(piso_num)}\b", p.stem)), None)
+    # Match tipo token: "1" separado por no-dígitos o inicio/fin
+    token_re = re.compile(rf"(^|[^0-9]){re.escape(piso_num)}([^0-9]|$)")
+    hit = next((p for p in imgs if token_re.search(p.stem)), None)
     if hit:
         return hit
+
+    # Match substring simple (sirve para piso1 / piso_1)
     hit2 = next((p for p in imgs if piso_num in p.stem), None)
     return hit2 or imgs[0]
-
 
 # ---------------------------------------------------------
 # Persistencia por piso/equipo/día (para tu editor nuevo)
@@ -492,3 +494,4 @@ def export_plan_png_pdf(
     img.save(pdf_path, format="PDF", resolution=150.0)
 
     return png_path, pdf_path
+
