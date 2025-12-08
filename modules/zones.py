@@ -4,7 +4,7 @@ import os
 import re
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Optional, Tuple, List
+from typing import Optional, Tuple, List
 
 from PIL import Image, ImageDraw, ImageFont, ImageColor
 
@@ -16,7 +16,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 ZONES_FILE = DATA_DIR / "zones.json"
 
-# ✅ OJO: en tu app los planos están en "modules/planos"
+# ✅ en tu app los planos están en "modules/planos"
 PLANOS_DIR = Path("modules/planos")
 COLORED_DIR = Path("planos_coloreados")
 PLANOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -24,9 +24,6 @@ COLORED_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------
 # IO (persistir zonas)
-# Formato recomendado:
-#   zones[piso_label] = { "version": "...", "objects": [...] }  (json de Fabric.js)
-#   o legacy: zones[piso_label] = [ {left,top,width,height,color,equipo,dia}, ... ]
 # ---------------------------------------------------------
 def load_zones() -> dict:
     if not ZONES_FILE.exists():
@@ -38,6 +35,7 @@ def load_zones() -> dict:
     except Exception:
         return {}
 
+
 def save_zones(data: dict) -> bool:
     try:
         with open(ZONES_FILE, "w", encoding="utf-8") as f:
@@ -45,6 +43,7 @@ def save_zones(data: dict) -> bool:
         return True
     except Exception:
         return False
+
 
 # ---------------------------------------------------------
 # Helpers
@@ -55,11 +54,13 @@ def _safe_int(x, default=0) -> int:
     except Exception:
         return default
 
+
 def _safe_float(x, default=0.0) -> float:
     try:
-        return float(str(x).replace(",", ".")))
+        return float(str(x).replace(",", "."))
     except Exception:
         return default
+
 
 def _normalize_piso_label(piso: str) -> str:
     s = str(piso or "").strip()
@@ -70,16 +71,18 @@ def _normalize_piso_label(piso: str) -> str:
     m = re.findall(r"\d+", s)
     return f"Piso {m[0]}" if m else s
 
+
 def _piso_num_from_label(piso_label: str) -> str:
     s = str(piso_label or "").strip()
     m = re.findall(r"\d+", s)
     return m[0] if m else "1"
 
+
 def _rgba_from_any(color: str, default=(0, 160, 74, 90)) -> Tuple[int, int, int, int]:
     """
     Acepta:
       - "rgba(r,g,b,a)" con a en [0..1] o [0..255]
-      - "#RRGGBB" / "red" / etc
+      - "#RRGGBB" / nombres ("red") / etc
     Devuelve RGBA con alpha 0..255
     """
     try:
@@ -99,27 +102,25 @@ def _rgba_from_any(color: str, default=(0, 160, 74, 90)) -> Tuple[int, int, int,
                 a = max(0, min(255, a))
                 return (r, g, b, a)
 
-        # hex/nombre
         r, g, b = ImageColor.getrgb(c)
         return (r, g, b, default[3])
     except Exception:
         return default
+
 
 def _get_font(font_name: str, size: int) -> ImageFont.ImageFont:
     size = max(8, int(size or 12))
     candidates = []
     if font_name:
         candidates.append(str(font_name))
-
-    # nombres típicos que suelen existir
     candidates.extend(["DejaVuSans.ttf", "Arial.ttf", "arial.ttf"])
-
     for fn in candidates:
         try:
             return ImageFont.truetype(fn, size)
         except Exception:
             continue
     return ImageFont.load_default()
+
 
 def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
     if not text:
@@ -130,6 +131,7 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) 
     except Exception:
         return (len(text) * 7, 12)
 
+
 # ---------------------------------------------------------
 # Planos: buscar imagen del piso
 # ---------------------------------------------------------
@@ -139,6 +141,7 @@ def _list_plan_images() -> List[Path]:
     for pat in patterns:
         imgs.extend(sorted(PLANOS_DIR.glob(pat)))
     return imgs
+
 
 def _find_plan_path_by_piso_label(piso_label: str) -> Optional[Path]:
     """
@@ -151,12 +154,12 @@ def _find_plan_path_by_piso_label(piso_label: str) -> Optional[Path]:
         return None
 
     piso_num = _piso_num_from_label(piso_label)
-    # match "1" como palabra o incluido
     hit = next((p for p in imgs if re.search(rf"\b{re.escape(piso_num)}\b", p.stem)), None)
     if hit:
         return hit
     hit2 = next((p for p in imgs if piso_num in p.stem), None)
     return hit2 or imgs[0]
+
 
 # ---------------------------------------------------------
 # Fabric.js (streamlit-drawable-canvas) → lista de "shapes"
@@ -167,11 +170,11 @@ def _fabric_objects(zones_json: dict) -> List[dict]:
     objs = zones_json.get("objects")
     return objs if isinstance(objs, list) else []
 
+
 def _extract_shapes_from_fabric(zones_json: dict) -> List[dict]:
     """
     Devuelve shapes normalizados:
-      {type, left, top, width, height, fill_rgba, stroke_rgba, ...}
-    Soporta: rect, circle, triangle
+      rect / circle / triangle (lo que el canvas usa)
     """
     out: List[dict] = []
     for o in _fabric_objects(zones_json):
@@ -196,8 +199,8 @@ def _extract_shapes_from_fabric(zones_json: dict) -> List[dict]:
                 "stroke_rgba": stroke,
                 "stroke_width": stroke_width,
             })
+
         elif t == "circle":
-            # fabric circle: radius, scaleX/scaleY
             r = float(o.get("radius", 0) or 0)
             sx = float(o.get("scaleX", 1) or 1)
             sy = float(o.get("scaleY", 1) or 1)
@@ -211,6 +214,7 @@ def _extract_shapes_from_fabric(zones_json: dict) -> List[dict]:
                 "stroke_rgba": stroke,
                 "stroke_width": stroke_width,
             })
+
         elif t == "triangle":
             w = float(o.get("width", 0) or 0) * float(o.get("scaleX", 1) or 1)
             h = float(o.get("height", 0) or 0) * float(o.get("scaleY", 1) or 1)
@@ -224,14 +228,12 @@ def _extract_shapes_from_fabric(zones_json: dict) -> List[dict]:
                 "stroke_rgba": stroke,
                 "stroke_width": stroke_width,
             })
-        else:
-            # ignoramos otras cosas (text, line, etc)
-            continue
 
     return out
 
+
 # ---------------------------------------------------------
-# Header/Título (simple, como lo que usa el nuevo App)
+# Título overlay (simple)
 # ---------------------------------------------------------
 def _draw_title_overlay(img: Image.Image, title: str, font_name: str = "DejaVuSans.ttf", font_size: int = 28) -> Image.Image:
     if not title:
@@ -245,7 +247,6 @@ def _draw_title_overlay(img: Image.Image, title: str, font_name: str = "DejaVuSa
     tw, th = _text_size(draw, title, font)
     pad = 16
 
-    # caja semitransparente arriba centrada
     box_w = min(img.size[0] - 2 * pad, tw + 2 * pad)
     box_h = th + 2 * pad
     x0 = (img.size[0] - box_w) // 2
@@ -260,8 +261,9 @@ def _draw_title_overlay(img: Image.Image, title: str, font_name: str = "DejaVuSa
 
     return Image.alpha_composite(img, overlay)
 
+
 # ---------------------------------------------------------
-# Public API: generate_colored_plan (para el nuevo App)
+# Public API: render del plano con zonas
 # ---------------------------------------------------------
 def generate_colored_plan(
     base_image_path: str,
@@ -271,12 +273,9 @@ def generate_colored_plan(
     title_size: int = 28,
 ) -> Image.Image:
     """
-    Genera una PIL.Image con:
+    Devuelve una PIL.Image:
       - base (plano) + overlay (formas transparentes)
-      - título opcional (overlay superior)
-
-    Esto calza con lo que te dejé en el App.py:
-      generate_colored_plan(base_image_path=..., zones_json=..., title=...)
+      - título opcional
     """
     if not base_image_path:
         raise ValueError("base_image_path vacío")
@@ -305,7 +304,6 @@ def generate_colored_plan(
             draw.rectangle([x0, y0, x1, y1], fill=s["fill_rgba"], outline=s["stroke_rgba"], width=sw)
 
         elif t == "circle":
-            # fabric circle uses left/top as bounding box start of circle object
             rx = float(s.get("radius_x", 0))
             ry = float(s.get("radius_y", 0))
             x0 = int(round(s["left"]))
@@ -323,13 +321,11 @@ def generate_colored_plan(
             h = float(s["height"])
             if w <= 0 or h <= 0:
                 continue
-            # triángulo hacia arriba
             p1 = (int(round(x0 + w / 2)), int(round(y0)))
             p2 = (int(round(x0)), int(round(y0 + h)))
             p3 = (int(round(x0 + w)), int(round(y0 + h)))
             draw.polygon([p1, p2, p3], fill=s["fill_rgba"], outline=s["stroke_rgba"])
             if sw > 1:
-                # borde "manual" para que se vea más
                 draw.line([p1, p2, p3, p1], fill=s["stroke_rgba"], width=sw)
 
     out = Image.alpha_composite(base, overlay)
@@ -338,22 +334,3 @@ def generate_colored_plan(
         out = _draw_title_overlay(out, title=str(title), font_name=title_font, font_size=int(title_size or 28))
 
     return out.convert("RGB")
-
-# ---------------------------------------------------------
-# (Opcional) utilidades para que el editor pueda persistir por piso
-# ---------------------------------------------------------
-def save_zones_for_floor(piso_label: str, zones_json: dict) -> bool:
-    """
-    Guarda el json completo (Fabric) por piso:
-      zones["Piso 1"] = {version, objects...}
-    """
-    piso_label = _normalize_piso_label(piso_label)
-    data = load_zones()
-    data[piso_label] = zones_json if isinstance(zones_json, dict) else {"version": "4.4.0", "objects": []}
-    return save_zones(data)
-
-def get_zones_for_floor(piso_label: str) -> dict:
-    piso_label = _normalize_piso_label(piso_label)
-    data = load_zones()
-    z = data.get(piso_label)
-    return z if isinstance(z, dict) else {"version": "4.4.0", "objects": []}
