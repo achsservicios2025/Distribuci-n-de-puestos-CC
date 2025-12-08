@@ -463,21 +463,8 @@ def admin_panel(conn):
                         st.warning("Primero genera una distribución para poder guardarla.")
                     else:
                         try:
-                            clear_distribution(conn)
-                            for r in rows:
-                                piso_db = _piso_to_label(r.get("piso"))
-                                dia_db = str(r.get("dia", "")).strip()
-                                equipo_db = str(r.get("equipo", "")).strip()
-                                cupos_db = int(float(r.get("cupos", 0) or 0))
-
-                                insert_distribution(
-                                    conn,
-                                    piso_db,
-                                    dia_db,
-                                    equipo_db,
-                                    cupos_db,
-                                    r.get("% uso diario", None)
-                                )
+                            # ✅ CAMBIO: guardar TODO en Sheets usando la función real del database.py
+                            insert_distribution(conn, rows)
                             st.success("✅ Distribución guardada en Google Sheets (DB).")
                             st.session_state["last_distribution_rows"] = rows
                             st.session_state["last_distribution_deficit"] = st.session_state.get("pending_distribution_deficit", [])
@@ -523,7 +510,6 @@ def admin_panel(conn):
                     # ✅ fallback %Uso semanal si viniera vacío
                     if "% uso semanal" not in df_out.columns:
                         df_out["% uso semanal"] = None
-                    # recalculo por equipo si hay NaN/None
                     needs_weekly = pd.to_numeric(df_out["% uso semanal"], errors="coerce").isna()
                     if needs_weekly.any():
                         wk2 = df_out.groupby(["piso", "equipo"], as_index=False).agg(
