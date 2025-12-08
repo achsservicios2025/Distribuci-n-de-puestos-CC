@@ -353,144 +353,144 @@ def admin_panel(conn):
     tabs = st.tabs(["Cargar Datos"])
 
     with tabs[0]:
-    st.markdown("### Cargar Excel y generar distribución")
-    st.caption("Tu motor seats espera hojas tipo: Equipos, Parámetros y Capacidades (nombres pueden variar).")
+        st.markdown("### Cargar Excel y generar distribución")
+        st.caption("Tu motor seats espera hojas tipo: Equipos, Parámetros y Capacidades (nombres pueden variar).")
 
-    up = st.file_uploader("Subir archivo Excel", type=["xlsx", "xls"], key="admin_excel_upload")
+        up = st.file_uploader("Subir archivo Excel", type=["xlsx", "xls"], key="admin_excel_upload")
 
-    colA, colB = st.columns([1, 1], vertical_alignment="center")
-    with colA:
-        cupos_reserva = st.number_input(
-            "Cupos libres (reserva diaria)",
-            min_value=0, max_value=50, value=2, step=1
-        )
-    with colB:
-        ignore_params = st.toggle(
-            "Ignorar parámetros (solo reparto proporcional)",
-            value=False
-        )
+        colA, colB = st.columns([1, 1], vertical_alignment="center")
+        with colA:
+            cupos_reserva = st.number_input(
+                "Cupos libres (reserva diaria)",
+                min_value=0, max_value=50, value=2, step=1
+            )
+        with colB:
+            ignore_params = st.toggle(
+                "Ignorar parámetros (solo reparto proporcional)",
+                value=False
+            )
 
-    # Seed interno para permitir "Regenerar" sin exponer selector de modo "o"
-    st.session_state.setdefault("variant_seed", 42)
+        # Seed interno para permitir "Regenerar" sin exponer selector de modo "o"
+        st.session_state.setdefault("variant_seed", 42)
 
-    seed_enabled = st.toggle("Usar seed", value=False)
-    if seed_enabled:
-        st.session_state["variant_seed"] = st.number_input(
-            "Seed",
-            min_value=0, max_value=10_000_000,
-            value=int(st.session_state.get("variant_seed", 42)),
-            step=1
-        )
+        seed_enabled = st.toggle("Usar seed", value=False)
+        if seed_enabled:
+            st.session_state["variant_seed"] = st.number_input(
+                "Seed",
+                min_value=0, max_value=10_000_000,
+                value=int(st.session_state.get("variant_seed", 42)),
+                step=1
+            )
 
-    if up is not None:
-        try:
-            xls = pd.ExcelFile(up)
-            sheets = {name: xls.parse(name) for name in xls.sheet_names}
+        if up is not None:
+            try:
+                xls = pd.ExcelFile(up)
+                sheets = {name: xls.parse(name) for name in xls.sheet_names}
 
-            st.success(f"✅ Archivo leído. Hojas: {', '.join(list(sheets.keys()))}")
+                st.success(f"✅ Archivo leído. Hojas: {', '.join(list(sheets.keys()))}")
 
-            # Detectores típicos
-            df_equipos = _safe_sheet_lookup(sheets, ["equipos", "equipo"])
-            df_param = _safe_sheet_lookup(sheets, ["parametros", "parámetros", "parametro", "parámetro"])
-            df_cap = _safe_sheet_lookup(sheets, ["capacidades", "capacidad", "aforo", "cupos"])
+                # Detectores típicos
+                df_equipos = _safe_sheet_lookup(sheets, ["equipos", "equipo"])
+                df_param = _safe_sheet_lookup(sheets, ["parametros", "parámetros", "parametro", "parámetro"])
+                df_cap = _safe_sheet_lookup(sheets, ["capacidades", "capacidad", "aforo", "cupos"])
 
-            with st.expander("Vista previa (primeras filas)", expanded=False):
-                if df_equipos is not None:
-                    st.markdown("**Equipos**")
-                    st.dataframe(df_equipos.head(20), use_container_width=True, hide_index=True)
-                else:
-                    st.warning("No pude detectar hoja de Equipos.")
+                with st.expander("Vista previa (primeras filas)", expanded=False):
+                    if df_equipos is not None:
+                        st.markdown("**Equipos**")
+                        st.dataframe(df_equipos.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("No pude detectar hoja de Equipos.")
 
-                if df_param is not None and not df_param.empty:
-                    st.markdown("**Parámetros**")
-                    st.dataframe(df_param.head(20), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Parámetros no detectados o vacíos (si ignoras params no importa).")
+                    if df_param is not None and not df_param.empty:
+                        st.markdown("**Parámetros**")
+                        st.dataframe(df_param.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Parámetros no detectados o vacíos (si ignoras params no importa).")
 
-                if df_cap is not None and not df_cap.empty:
-                    st.markdown("**Capacidades**")
-                    st.dataframe(df_cap.head(20), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Capacidades no detectadas o vacías (seats hará fallback).")
+                    if df_cap is not None and not df_cap.empty:
+                        st.markdown("**Capacidades**")
+                        st.dataframe(df_cap.head(20), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Capacidades no detectadas o vacías (seats hará fallback).")
 
-            # --- Botones Generar / Regenerar ---
-            b1, b2 = st.columns([1, 1], vertical_alignment="center")
-            gen = b1.button("Generar distribución", type="primary", key="btn_gen_dist")
-            regen = b2.button("Regenerar", key="btn_regen_dist")
+                # --- Botones Generar / Regenerar ---
+                b1, b2 = st.columns([1, 1], vertical_alignment="center")
+                gen = b1.button("Generar distribución", type="primary", key="btn_gen_dist")
+                regen = b2.button("Regenerar", key="btn_regen_dist")
 
-            if regen:
-                # cambia seed para forzar una nueva variante (solo afecta si hay reglas "o")
-                st.session_state["variant_seed"] = int(st.session_state.get("variant_seed", 42)) + 1
-                st.rerun()
+                if regen:
+                    # cambia seed para forzar una nueva variante (solo afecta si hay reglas "o")
+                    st.session_state["variant_seed"] = int(st.session_state.get("variant_seed", 42)) + 1
+                    st.rerun()
 
-            if gen:
-                if df_equipos is None or df_equipos.empty:
-                    st.error("Falta hoja Equipos (o está vacía).")
-                    return
-
-                if df_param is None:
-                    df_param = pd.DataFrame()
-                if df_cap is None:
-                    df_cap = pd.DataFrame()
-
-                # ✅ Si parámetros están activos -> generar 10 opciones y elegir la mejor por score
-                if not bool(ignore_params):
-                    variants = compute_distribution_variants(
-                        equipos_df=df_equipos,
-                        parametros_df=df_param,
-                        df_capacidades=df_cap,
-                        cupos_reserva=int(cupos_reserva),
-                        ignore_params=False,
-                        n_variants=10,
-                        variant_seed=int(st.session_state.get("variant_seed", 42)),
-                        variant_mode="holgura",  # fijo (ya no hay UI "modo regla o")
-                    )
-                    best = variants[0] if variants else None
-                    if not best or not best.get("rows"):
-                        st.error("No se generaron filas. Revisa que el Excel tenga columnas clave.")
-                        return
-                    rows = best["rows"]
-                    deficit_report = best.get("deficit_report", [])
-                    audit = best.get("audit", {})
-                    score_obj = best.get("score", {})
-                else:
-                    # ✅ Sin parámetros: cálculo normal por capacidades - cupos libres
-                    rows, deficit_report, audit, score_obj = compute_distribution_from_excel(
-                        equipos_df=df_equipos,
-                        parametros_df=df_param,
-                        df_capacidades=df_cap,
-                        cupos_reserva=int(cupos_reserva),
-                        ignore_params=True,
-                        variant_seed=int(st.session_state.get("variant_seed", 42)) if seed_enabled else None,
-                        variant_mode="holgura",
-                    )
-
-                    if not rows:
-                        st.error("No se generaron filas (rows vacías). Revisa que el Excel tenga columnas clave.")
-                        st.write(score_obj)
+                if gen:
+                    if df_equipos is None or df_equipos.empty:
+                        st.error("Falta hoja Equipos (o está vacía).")
                         return
 
-                # Guardar en DB
-                try:
-                    clear_distribution(conn)
-                    for r in rows:
-                        piso_db = _piso_to_label(r.get("piso"))
-                        dia_db = str(r.get("dia", "")).strip()
-                        equipo_db = str(r.get("equipo", "")).strip()
-                        cupos_db = int(float(r.get("cupos", 0) or 0))
+                    if df_param is None:
+                        df_param = pd.DataFrame()
+                    if df_cap is None:
+                        df_cap = pd.DataFrame()
 
-                        insert_distribution(
-                            conn,
-                            piso_db,
-                            dia_db,
-                            equipo_db,
-                            cupos_db,
-                            r.get("% uso diario", None)
+                    # ✅ Si parámetros están activos -> generar 10 opciones y elegir la mejor por score
+                    if not bool(ignore_params):
+                        variants = compute_distribution_variants(
+                            equipos_df=df_equipos,
+                            parametros_df=df_param,
+                            df_capacidades=df_cap,
+                            cupos_reserva=int(cupos_reserva),
+                            ignore_params=False,
+                            n_variants=10,
+                            variant_seed=int(st.session_state.get("variant_seed", 42)),
+                            variant_mode="holgura",  # fijo (ya no hay UI "modo regla o")
                         )
-                    st.success("✅ Distribución guardada en Google Sheets (DB).")
-                except Exception as e:
-                    st.error(f"No pude guardar en DB: {e}")
-                    return
+                        best = variants[0] if variants else None
+                        if not best or not best.get("rows"):
+                            st.error("No se generaron filas. Revisa que el Excel tenga columnas clave.")
+                            return
+                        rows = best["rows"]
+                        deficit_report = best.get("deficit_report", [])
+                        audit = best.get("audit", {})
+                        score_obj = best.get("score", {})
+                    else:
+                        # ✅ Sin parámetros: cálculo normal por capacidades - cupos libres
+                        rows, deficit_report, audit, score_obj = compute_distribution_from_excel(
+                            equipos_df=df_equipos,
+                            parametros_df=df_param,
+                            df_capacidades=df_cap,
+                            cupos_reserva=int(cupos_reserva),
+                            ignore_params=True,
+                            variant_seed=int(st.session_state.get("variant_seed", 42)) if seed_enabled else None,
+                            variant_mode="holgura",
+                        )
+
+                        if not rows:
+                            st.error("No se generaron filas (rows vacías). Revisa que el Excel tenga columnas clave.")
+                            st.write(score_obj)
+                            return
+
+                    # Guardar en DB
+                    try:
+                        clear_distribution(conn)
+                        for r in rows:
+                            piso_db = _piso_to_label(r.get("piso"))
+                            dia_db = str(r.get("dia", "")).strip()
+                            equipo_db = str(r.get("equipo", "")).strip()
+                            cupos_db = int(float(r.get("cupos", 0) or 0))
+
+                            insert_distribution(
+                                conn,
+                                piso_db,
+                                dia_db,
+                                equipo_db,
+                                cupos_db,
+                                r.get("% uso diario", None)
+                            )
+                        st.success("✅ Distribución guardada en Google Sheets (DB).")
+                    except Exception as e:
+                        st.error(f"No pude guardar en DB: {e}")
+                        return
 
                 # -----------------------------
                 # ✅ VISTA PREVIA (RESUMEN)
@@ -704,5 +704,6 @@ else:
     screen_admin(conn)
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
 
