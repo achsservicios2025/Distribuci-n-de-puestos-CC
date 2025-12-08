@@ -530,10 +530,6 @@ def admin_panel(conn):
                             hide_index=True
                         )
 
-                    if score_obj:
-                        st.markdown("### Score (mejor opción encontrada)")
-                        st.json(score_obj)
-
             except Exception as e:
                 st.error(f"No se pudo leer el Excel: {e}")
 
@@ -680,3 +676,4 @@ else:
     screen_admin(conn)
 
 st.markdown("</div>", unsafe_allow_html=True)
+
