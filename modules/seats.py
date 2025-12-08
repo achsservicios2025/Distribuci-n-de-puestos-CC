@@ -5,11 +5,7 @@ import random
 from typing import Any, Dict, List, Optional
 
 
-# ---------------------------------------------------------
-# Helpers de texto / normalización
-# ---------------------------------------------------------
 def normalize_text(text):
-    """Limpia textos para comparaciones básicas de columnas."""
     if pd.isna(text) or text == "":
         return ""
     text = str(text).strip().lower()
@@ -23,16 +19,10 @@ def normalize_text(text):
 
 
 def extract_clean_number_str(val):
-    """
-    Normalizador agresivo de Pisos.
-    Convierte: "Piso 1", 1, 1.0, "1 ", "Nivel 1" -> "1"
-    Devuelve siempre un STRING limpio o None.
-    """
     if pd.isna(val):
         return None
 
     s = str(val).strip()
-
     try:
         f = float(s)
         if f.is_integer():
@@ -43,24 +33,14 @@ def extract_clean_number_str(val):
     nums = re.findall(r"\d+", s)
     if nums:
         return str(int(nums[0]))
-
     return None
 
 
-# ---------------------------------------------------------
-# Día completo: parseo con la semántica EXACTA pedida
-# ---------------------------------------------------------
 def parse_full_day_rule(text: Any) -> Dict[str, Any]:
-    """
-    Regla textual:
-      - "Lunes, Miércoles" => fixed en ambos días
-      - "Lunes o Miércoles" / "Lunes, o Miércoles" => choice (elige 1)
-    """
     if pd.isna(text) or str(text).strip() == "":
         return {"type": "none", "days": []}
 
     raw = str(text).strip()
-
     mapa = {
         "lunes": "Lunes",
         "martes": "Martes",
@@ -102,9 +82,6 @@ def parse_full_day_rule(text: Any) -> Dict[str, Any]:
     return {"type": "fixed", "days": out}
 
 
-# ---------------------------------------------------------
-# Saint-Laguë
-# ---------------------------------------------------------
 def saint_lague_allocate(
     weights: Dict[str, int],
     seats: int,
@@ -112,13 +89,6 @@ def saint_lague_allocate(
     caps: Optional[Dict[str, int]] = None,
     rng: Optional[random.Random] = None
 ) -> Dict[str, int]:
-    """
-    Asigna 'seats' unidades con método Sainte-Laguë.
-    - weights: dict equipo->peso (demanda restante)
-    - current: dict equipo->asignado actual (para calcular divisor 2a+1)
-    - caps: dict equipo->máximo adicional permitido (para no pasarse)
-    - rng: si hay empate, desempata con rng (controlado por variant_seed)
-    """
     if seats <= 0 or not weights:
         return {k: 0 for k in weights.keys()}
 
@@ -154,9 +124,6 @@ def saint_lague_allocate(
     return alloc
 
 
-# ---------------------------------------------------------
-# Heurística para elegir día en reglas "o"
-# ---------------------------------------------------------
 def choose_flexible_day(
     opts: List[str],
     per: int,
@@ -165,12 +132,6 @@ def choose_flexible_day(
     mode: str,
     rng: random.Random
 ) -> Optional[str]:
-    """
-    mode:
-      - "holgura": maximiza holgura (hard_limit - (load + per))
-      - "equilibrar": manda al día con menor carga total (load)
-      - "aleatorio": aleatorio con seed
-    """
     opts = [d for d in opts if d in load_by_day]
     if not opts:
         return None
@@ -184,9 +145,6 @@ def choose_flexible_day(
     return max(opts, key=lambda d: ((hard_limit - (load_by_day[d] + per)), rng.random()))
 
 
-# ---------------------------------------------------------
-# Motor: distribución
-# ---------------------------------------------------------
 def compute_distribution_from_excel(
     equipos_df,
     parametros_df,
@@ -196,28 +154,6 @@ def compute_distribution_from_excel(
     variant_seed: Optional[int] = None,
     variant_mode: str = "holgura",
 ):
-    """
-    Además (para PDF/UI):
-      - Se mantienen "Cupos libres" (reserva diaria), pero NO se usan para % uso diario/semanal.
-      - Se agregan columnas:
-          * "dotacion"
-          * "% uso diario"  = cupos_equipo_dia / capacidad_usable_dia * 100
-          * "% uso semanal" = cupos_semana_equipo / (dotación_equipo * 5) * 100
-      - capacidad_usable_dia = cap_total_real - reserva  (hard_limit)
-
-    ✅ Deficit reportado: contra el mínimo diario objetivo (min_obj):
-        deficit = max(0, min_obj - asignado)
-
-    ✅ Reglas SIEMPRE (con o sin parámetros):
-        - si dotación (per) >= 2 => mínimo base diario = 2
-        - si dotación (per) == 1 => mínimo base diario = 1
-        - si dotación (per) == 0 => mínimo base diario = 0
-
-    ✅ Si ignore_params=False:
-        min_obj = max(min_base, mínimo_excel) (acotados por per)
-      Si ignore_params=True:
-        min_obj = min_base
-    """
     rng = random.Random(variant_seed if variant_seed is not None else 0)
 
     rows: List[Dict[str, Any]] = []
@@ -333,7 +269,7 @@ def compute_distribution_from_excel(
                 mini_raw = 0
             mini_raw = max(0, mini_raw)
 
-            # ✅ BASE MIN (SIEMPRE)
+            # ✅ mínimo base SIEMPRE (regla 1)
             if per >= 2:
                 base_min = 2
             elif per == 1:
@@ -342,22 +278,14 @@ def compute_distribution_from_excel(
                 base_min = 0
             base_min = min(per, base_min)
 
-            # ✅ mínimo Excel (solo influye si params activos)
+            # mínimo Excel (solo se considera si params activos)
             min_excel = min(per, mini_raw)
 
-            # ✅ mínimo objetivo final
-            if ignore_params:
-                min_obj = base_min
-            else:
-                min_obj = max(base_min, min_excel)
+            # mínimo objetivo final por día
+            min_obj = base_min if ignore_params else max(base_min, min_excel)
+            min_obj = min(per, int(min_obj))
 
-            equipos_info.append({
-                "eq": nm,
-                "per": per,
-                "min": int(min_obj),
-                "base_min": int(base_min),
-                "min_excel": int(min_excel),
-            })
+            equipos_info.append({"eq": nm, "per": per, "min": int(min_obj)})
 
         weekly_assigned: Dict[str, int] = {info["eq"]: 0 for info in equipos_info}
         weekly_dot: Dict[str, int] = {info["eq"]: int(info["per"]) for info in equipos_info}
@@ -404,7 +332,7 @@ def compute_distribution_from_excel(
                 nm = info["eq"]
                 nm_norm = normalize_text(nm)
                 per = int(info["per"])
-                mini = int(info["min"])
+                min_obj = int(info["min"])
 
                 is_full_day = False
                 if not ignore_params:
@@ -415,17 +343,11 @@ def compute_distribution_from_excel(
                         elif rule["type"] == "choice" and full_day_choice_assignment.get(nm_norm) == dia:
                             is_full_day = True
 
-                state.append({
-                    "eq": nm,
-                    "per": per,
-                    "min": mini,          # <- min objetivo (base o max(base,excel))
-                    "full_day": is_full_day,
-                    "asig": 0
-                })
+                state.append({"eq": nm, "per": per, "min": min_obj, "full_day": is_full_day, "asig": 0})
 
             used = 0
 
-            # 1) full-day (solo si params activos)
+            # 0) FULL-DAY (solo con params)
             if not ignore_params:
                 for t in state:
                     if t["full_day"] and t["per"] > 0:
@@ -435,7 +357,6 @@ def compute_distribution_from_excel(
                 if used > hard_limit:
                     exceso = used - hard_limit
                     total_recortes_full_day += exceso
-
                     fulls = [t for t in state if t["full_day"] and t["asig"] > 0]
                     while exceso > 0 and fulls:
                         fulls.sort(key=lambda x: x["asig"], reverse=True)
@@ -444,25 +365,34 @@ def compute_distribution_from_excel(
                         exceso -= 1
                         fulls = [t for t in fulls if t["asig"] > 0]
 
-            # 2) mínimos diarios (SIEMPRE)
-            for t in state:
-                if t["per"] <= 0:
-                    continue
-                target_min = min(t["per"], t["min"])
-                if t["asig"] < target_min:
-                    need = target_min - t["asig"]
-                    if used + need <= hard_limit:
-                        t["asig"] += need
-                        used += need
-                    else:
-                        give = max(0, hard_limit - used)
+            # 1) ✅ REGla 1 SIEMPRE: mínimos diarios (base o base+excel)
+            #    Si NO alcanza capacidad para todos los mínimos, repartir los "mínimos posibles" con Sainte-Laguë.
+            min_need = {t["eq"]: max(0, min(t["per"], t["min"]) - t["asig"]) for t in state if t["per"] > 0}
+            total_need = sum(min_need.values())
+            rem_for_mins = max(0, hard_limit - used)
+
+            if total_need > 0 and rem_for_mins > 0:
+                if rem_for_mins >= total_need:
+                    # alcanza para cubrir mínimos completos
+                    for t in state:
+                        need = max(0, min(t["per"], t["min"]) - t["asig"])
+                        if need > 0:
+                            t["asig"] += need
+                            used += need
+                else:
+                    # NO alcanza: repartir rem_for_mins proporcional a "need" con Sainte-Laguë
+                    weights = {eq: need for eq, need in min_need.items() if need > 0}
+                    caps = {eq: need for eq, need in min_need.items() if need > 0}
+                    current = {t["eq"]: t["asig"] for t in state}
+                    alloc_mins = saint_lague_allocate(weights=weights, seats=rem_for_mins, current=current, caps=caps, rng=rng)
+                    for t in state:
+                        give = int(alloc_mins.get(t["eq"], 0))
                         if give > 0:
                             t["asig"] += give
                             used += give
 
-            # 3) resto por Sainte-Laguë (demanda restante)
+            # 2) resto por Sainte-Laguë (demanda restante)
             rem = max(0, hard_limit - used)
-
             weights = {}
             caps = {}
             current_for_divisor = {}
@@ -482,10 +412,9 @@ def compute_distribution_from_excel(
 
             for t in state:
                 t["asig"] += int(alloc_extra.get(t["eq"], 0))
-
-            for t in state:
                 weekly_assigned[t["eq"]] = weekly_assigned.get(t["eq"], 0) + int(t["asig"])
 
+            # score proporción
             sum_per = sum(max(0, t["per"]) for t in state)
             if sum_per > 0 and hard_limit > 0:
                 for t in state:
@@ -496,7 +425,7 @@ def compute_distribution_from_excel(
                     total_sq_error += err * err
                     n_eval += 1
 
-            # rows por equipo
+            # rows
             for t in state:
                 uso_diario = round((t["asig"] / hard_limit) * 100.0, 2) if hard_limit > 0 else 0.0
                 rows.append({
@@ -509,7 +438,7 @@ def compute_distribution_from_excel(
                     "% uso semanal": None,
                 })
 
-            # ✅ déficit contra mínimo diario objetivo (SIEMPRE)
+            # déficit SIEMPRE contra el mínimo objetivo diario
             for t in state:
                 if t["per"] <= 0:
                     continue
@@ -539,12 +468,12 @@ def compute_distribution_from_excel(
                 "% uso semanal": None,
             })
 
+        # % uso semanal por equipo
         weekly_usage_by_team: Dict[str, float] = {}
         for eq, wk_cupos in weekly_assigned.items():
             dot = int(weekly_dot.get(eq, 0))
             weekly_usage_by_team[eq] = round((wk_cupos / (dot * 5)) * 100.0, 2) if dot > 0 else 0.0
 
-        # asignar % uso semanal en cada fila del piso
         for r in rows:
             if r.get("piso") != piso_str:
                 continue
@@ -553,7 +482,6 @@ def compute_distribution_from_excel(
                 continue
             r["% uso semanal"] = float(weekly_usage_by_team.get(eq, 0.0))
 
-        # audit summary por piso/equipo
         for eq in weekly_assigned.keys():
             dot = int(weekly_dot.get(eq, 0))
             wk_cupos = int(weekly_assigned.get(eq, 0))
