@@ -185,6 +185,17 @@ def choose_flexible_day(
 
 
 # ---------------------------------------------------------
+# Helpers numéricos
+# ---------------------------------------------------------
+def round_half_up(x: float) -> int:
+    """Redondeo con .5 hacia arriba: 4.4->4, 4.5->5"""
+    try:
+        return int(float(x) + 0.5)
+    except Exception:
+        return 0
+
+
+# ---------------------------------------------------------
 # Motor: distribución
 # ---------------------------------------------------------
 def compute_distribution_from_excel(
@@ -205,10 +216,14 @@ def compute_distribution_from_excel(
           * "% uso semanal" = cupos_semana_equipo / (dotación_equipo * 5) * 100
       - capacidad_usable_dia = cap_total_real - reserva  (hard_limit)
 
-    ✅ Deficit reportado AHORA es contra el mínimo diario objetivo:
+    ✅ Deficit reportado es contra el mínimo diario objetivo:
         deficit = max(0, min_diario_objetivo - asignado)
-    ✅ Nueva regla:
-        Si dotación (per) >= 2 => min_diario_objetivo >= 2
+
+    ✅ Regla GLOBAL (siempre, con o sin parámetros):
+        Si dotación (per) >= 2 => min_diario_objetivo >= 2 (y respeta el mínimo del excel si es mayor)
+
+    ✅ Agrega en cada fila:
+        "promedio_cupos_diarios" = redondeo_half_up( (cupos_semana_equipo / 5) )
     """
     rng = random.Random(variant_seed if variant_seed is not None else 0)
 
@@ -325,22 +340,23 @@ def compute_distribution_from_excel(
                 mini_raw = 0
             mini_raw = max(0, mini_raw)
 
-            # ✅ NUEVA REGLA: si dotación >= 2 => mínimo diario >= 2
-            # además respetamos el mínimo del excel si es mayor.
+            # ✅ REGLA GLOBAL SIEMPRE:
+            # si dotación >= 2 => mínimo diario >= 2 (y respeta el mínimo del excel si es mayor)
             mini_obj = mini_raw
             if per >= 2:
                 mini_obj = max(2, mini_raw)
 
-            # ✅ nunca pedimos más que la dotación (no puedes sentar más que personas)
+            # nunca pedimos más que la dotación
             mini_obj = min(per, mini_obj)
 
             equipos_info.append({"eq": nm, "per": per, "min": mini_obj})
 
         weekly_assigned: Dict[str, int] = {info["eq"]: 0 for info in equipos_info}
         weekly_dot: Dict[str, int] = {info["eq"]: int(info["per"]) for info in equipos_info}
+        min_by_eq: Dict[str, int] = {info["eq"]: int(info["min"]) for info in equipos_info}
 
         full_day_choice_assignment = {}
-        if not ignore_params and reglas_full_day:
+        if (not ignore_params) and reglas_full_day:
             load_by_day = {d: 0 for d in dias_semana}
 
             for info in equipos_info:
@@ -402,7 +418,7 @@ def compute_distribution_from_excel(
 
             used = 0
 
-            # 1) full-day (si aplica)
+            # 1) full-day (solo si params activos y aplica)
             if not ignore_params:
                 for t in state:
                     if t["full_day"] and t["per"] > 0:
@@ -421,22 +437,21 @@ def compute_distribution_from_excel(
                         exceso -= 1
                         fulls = [t for t in fulls if t["asig"] > 0]
 
-            # 2) mínimos diarios (si params activos)
-            if not ignore_params:
-                for t in state:
-                    if t["per"] <= 0:
-                        continue
-                    target_min = min(t["per"], t["min"])
-                    if t["asig"] < target_min:
-                        need = target_min - t["asig"]
-                        if used + need <= hard_limit:
-                            t["asig"] += need
-                            used += need
-                        else:
-                            give = max(0, hard_limit - used)
-                            if give > 0:
-                                t["asig"] += give
-                                used += give
+            # 2) mínimos diarios (✅ SIEMPRE, con o sin params)
+            for t in state:
+                if t["per"] <= 0:
+                    continue
+                target_min = min(t["per"], t["min"])
+                if t["asig"] < target_min:
+                    need = target_min - t["asig"]
+                    if used + need <= hard_limit:
+                        t["asig"] += need
+                        used += need
+                    else:
+                        give = max(0, hard_limit - used)
+                        if give > 0:
+                            t["asig"] += give
+                            used += give
 
             # 3) resto por Sainte-Laguë (demanda restante)
             rem = max(0, hard_limit - used)
@@ -461,6 +476,10 @@ def compute_distribution_from_excel(
             for t in state:
                 t["asig"] += int(alloc_extra.get(t["eq"], 0))
 
+            # ✅ FIX CLAVE: acumular cupos semanales por equipo
+            for t in state:
+                weekly_assigned[t["eq"]] = weekly_assigned.get(t["eq"], 0) + int(t["asig"])
+
             sum_per = sum(max(0, t["per"]) for t in state)
             if sum_per > 0 and hard_limit > 0:
                 for t in state:
@@ -471,7 +490,7 @@ def compute_distribution_from_excel(
                     total_sq_error += err * err
                     n_eval += 1
 
-            # rows por equipo (incluye 0 si quieres, pero tu UI filtra)
+            # rows por equipo
             for t in state:
                 uso_diario = round((t["asig"] / hard_limit) * 100.0, 2) if hard_limit > 0 else 0.0
                 rows.append({
@@ -482,26 +501,26 @@ def compute_distribution_from_excel(
                     "cupos": int(t["asig"]),
                     "% uso diario": float(uso_diario),
                     "% uso semanal": None,
+                    "promedio_cupos_diarios": None,
                 })
 
-            # ✅ déficit contra mínimo diario objetivo (solo si params activos)
-            if not ignore_params:
-                for t in state:
-                    if t["per"] <= 0:
-                        continue
-                    min_obj = int(min(t["per"], t["min"]))  # min ya viene con regla per>=2 => >=2
-                    deficit = int(max(0, min_obj - t["asig"]))
-                    if deficit > 0:
-                        total_deficit += deficit
-                        deficit_report.append({
-                            "piso": piso_str,
-                            "equipo": t["eq"],
-                            "dia": dia,
-                            "dotacion": int(t["per"]),
-                            "minimo": int(min_obj),
-                            "asignado": int(t["asig"]),
-                            "deficit": deficit,
-                        })
+            # ✅ déficit contra mínimo diario objetivo (✅ SIEMPRE)
+            for t in state:
+                if t["per"] <= 0:
+                    continue
+                min_obj = int(min(t["per"], t["min"]))
+                deficit = int(max(0, min_obj - t["asig"]))
+                if deficit > 0:
+                    total_deficit += deficit
+                    deficit_report.append({
+                        "piso": piso_str,
+                        "equipo": t["eq"],
+                        "dia": dia,
+                        "dotacion": int(t["per"]),
+                        "minimo": int(min_obj),
+                        "asignado": int(t["asig"]),
+                        "deficit": deficit,
+                    })
 
             # cupos libres
             libres = RESERVA_OBLIGATORIA if cap_total_real >= RESERVA_OBLIGATORIA else cap_total_real
@@ -513,12 +532,17 @@ def compute_distribution_from_excel(
                 "cupos": int(libres),
                 "% uso diario": None,
                 "% uso semanal": None,
+                "promedio_cupos_diarios": None,
             })
 
+        # % uso semanal y promedio_cupos_diarios por equipo (mismo valor para todos los días)
         weekly_usage_by_team: Dict[str, float] = {}
+        avg_daily_by_team: Dict[str, int] = {}
+
         for eq, wk_cupos in weekly_assigned.items():
             dot = int(weekly_dot.get(eq, 0))
             weekly_usage_by_team[eq] = round((wk_cupos / (dot * 5)) * 100.0, 2) if dot > 0 else 0.0
+            avg_daily_by_team[eq] = round_half_up(wk_cupos / 5.0)
 
         for r in rows:
             if r.get("piso") != piso_str:
@@ -527,18 +551,21 @@ def compute_distribution_from_excel(
             if not eq or normalize_text(eq) == normalize_text("Cupos libres"):
                 continue
             r["% uso semanal"] = float(weekly_usage_by_team.get(eq, 0.0))
+            r["promedio_cupos_diarios"] = int(avg_daily_by_team.get(eq, 0))
 
+        # dump summary para auditoría
         for eq in weekly_assigned.keys():
             dot = int(weekly_dot.get(eq, 0))
             wk_cupos = int(weekly_assigned.get(eq, 0))
-            avg_daily = round(wk_cupos / 5.0, 2)
             audit["weekly_summary"].append({
                 "piso": piso_str,
                 "equipo": eq,
                 "dotacion": dot,
                 "cupos_semana": wk_cupos,
-                "cupos_promedio_diario": avg_daily,
+                "cupos_promedio_diario": float(wk_cupos / 5.0),
+                "cupos_promedio_diario_redondeado": int(avg_daily_by_team.get(eq, 0)),
                 "% uso semanal": float(weekly_usage_by_team.get(eq, 0.0)),
+                "min_diario_objetivo": int(min_by_eq.get(eq, 0)),
             })
 
     mse = (total_sq_error / max(1, n_eval))
