@@ -267,13 +267,13 @@ def render_topbar_and_menu():
     with c1:
         if logo_path.exists():
             st.markdown("<div class='mk-logo-btn'>", unsafe_allow_html=True)
-            if st.button(" ", key="logo_home_btn"):
+            if st.button(" ", key="tb_logo_home_btn"):
                 go("Administrador")
                 st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
             st.image(str(logo_path), width=logo_w)
         else:
-            if st.button("🧩 Inicio", key="logo_home_fallback"):
+            if st.button("🧩 Inicio", key="tb_logo_home_fallback"):
                 go("Administrador")
                 st.rerun()
 
@@ -288,7 +288,7 @@ def render_topbar_and_menu():
             "Menú",
             ["—", "Inicio", "Reservas", "Ver Distribución y Planos"],
             index=0,
-            key="top_menu_select",
+            key="tb_top_menu_select",
         )
         if menu_choice == "Inicio":
             go("Administrador")
@@ -338,7 +338,7 @@ def admin_panel(conn):
     with top[1]:
         _, b = st.columns([1, 1])
         with b:
-            if st.button("Cerrar sesión", key="btn_admin_logout", use_container_width=True):
+            if st.button("Cerrar sesión", key="ap_btn_admin_logout", use_container_width=True):
                 admin_logout()
 
     tabs = st.tabs(["Cargar Datos"])
@@ -347,29 +347,32 @@ def admin_panel(conn):
         st.markdown("### Cargar Excel y generar distribución")
         st.caption("Tu motor seats espera hojas tipo: Equipos, Parámetros y Capacidades (nombres pueden variar).")
 
-        up = st.file_uploader("Subir archivo Excel", type=["xlsx", "xls"], key="admin_excel_upload")
+        up = st.file_uploader("Subir archivo Excel", type=["xlsx", "xls"], key="ap_admin_excel_upload")
 
         colA, colB = st.columns([1, 1], vertical_alignment="center")
         with colA:
             cupos_reserva = st.number_input(
                 "Cupos libres (reserva diaria)",
-                min_value=0, max_value=50, value=2, step=1
+                min_value=0, max_value=50, value=2, step=1,
+                key="ap_cupos_reserva"
             )
         with colB:
             ignore_params = st.toggle(
                 "Ignorar parámetros (solo reparto proporcional)",
-                value=False
+                value=False,
+                key="ap_ignore_params"
             )
 
         st.session_state.setdefault("variant_seed", 42)
 
-        seed_enabled = st.toggle("Usar seed", value=False)
+        seed_enabled = st.toggle("Usar seed", value=False, key="ap_seed_enabled")
         if seed_enabled:
             st.session_state["variant_seed"] = st.number_input(
                 "Seed",
                 min_value=0, max_value=10_000_000,
                 value=int(st.session_state.get("variant_seed", 42)),
-                step=1
+                step=1,
+                key="ap_seed_value"
             )
 
         # Estado interno: vista previa (no guarda en DB hasta apretar "Guardar Distribución")
@@ -391,9 +394,9 @@ def admin_panel(conn):
 
                 # --- Botones Generar / Regenerar / Guardar ---
                 b1, b2, b3 = st.columns([1, 1, 1], vertical_alignment="center")
-                gen = b1.button("Generar distribución", type="primary", key="btn_gen_dist")
-                regen = b2.button("Regenerar", key="btn_regen_dist")
-                save_btn = b3.button("Guardar Distribución", key="btn_save_dist")
+                gen = b1.button("Generar distribución", type="primary", key="ap_btn_gen_dist")
+                regen = b2.button("Regenerar", key="ap_btn_regen_dist")
+                save_btn = b3.button("Guardar Distribución", key="ap_btn_save_dist")
 
                 if regen:
                     st.session_state["variant_seed"] = int(st.session_state.get("variant_seed", 42)) + 1
@@ -409,8 +412,6 @@ def admin_panel(conn):
                     if df_cap is None:
                         df_cap = pd.DataFrame()
 
-                    # Saint-Laguë siempre aplica (tu motor ya usa Sainte-Laguë),
-                    # y si ignore_params=False generamos 10 variantes (respeta reglas "o")
                     if not bool(ignore_params):
                         variants = compute_distribution_variants(
                             equipos_df=df_equipos,
@@ -445,7 +446,6 @@ def admin_panel(conn):
                             st.write(score_obj)
                             return
 
-                    # Guardar solo como "pendiente" (vista previa). No toca DB aún.
                     st.session_state["pending_distribution_rows"] = rows
                     st.session_state["pending_distribution_deficit"] = deficit_report
                     st.session_state["pending_distribution_audit"] = audit
@@ -481,36 +481,27 @@ def admin_panel(conn):
                             st.error(f"No pude guardar en DB: {e}")
                             return
 
-                # -----------------------------
-                # ✅ VISTA PREVIA = resultado del seats actualizado (semanal->diario)
-                # Se muestra como expander + detalle por Piso y días (Lunes..Viernes)
-                # Columnas: Piso, Equipo, Personas, Días, Cupos Diarios, %Uso Diario, %Uso semanal, Deficit (si existe)
-                # -----------------------------
+                # VISTA PREVIA
                 rows = st.session_state.get("pending_distribution_rows", [])
                 deficit_report = st.session_state.get("pending_distribution_deficit", [])
                 score_obj = st.session_state.get("pending_distribution_score", {})
 
                 if rows:
                     df_out = pd.DataFrame(rows)
-
-                    # quitar cupos libres de la tabla principal
                     if "equipo" in df_out.columns:
                         df_out = df_out[df_out["equipo"].astype(str).str.strip().str.lower() != "cupos libres"].copy()
 
-                    # normalizaciones
                     df_out["cupos"] = pd.to_numeric(df_out.get("cupos"), errors="coerce").fillna(0).astype(int)
                     df_out["dotacion"] = pd.to_numeric(df_out.get("dotacion"), errors="coerce")
                     df_out["piso"] = df_out["piso"].astype(str)
                     df_out["dia"] = df_out["dia"].astype(str)
 
-                    # deficit por piso/equipo/día (si existe)
                     df_def = pd.DataFrame(deficit_report) if deficit_report else pd.DataFrame()
                     if not df_def.empty and {"piso", "equipo", "dia", "deficit"}.issubset(df_def.columns):
                         df_def2 = df_def.groupby(["piso", "equipo", "dia"], as_index=False)["deficit"].sum()
                         df_def2.rename(columns={"deficit": "Deficit"}, inplace=True)
                         df_out = df_out.merge(df_def2, on=["piso", "equipo", "dia"], how="left")
 
-                    # preparar columnas finales
                     df_out.rename(columns={
                         "piso": "Piso",
                         "equipo": "Equipo",
@@ -521,19 +512,16 @@ def admin_panel(conn):
                         "% uso semanal": "%Uso semanal",
                     }, inplace=True)
 
-                    # ordenar por Piso, Días (ORDER_DIAS), Equipo
                     order_map = {d: i for i, d in enumerate(ORDER_DIAS)}
                     df_out["_ord_dia"] = df_out["Días"].map(order_map).fillna(999).astype(int)
                     df_out["_ord_piso"] = df_out["Piso"].str.extract(r"(\d+)")[0].fillna("9999").astype(int)
 
-                    # columnas requeridas
                     base_cols = ["Piso", "Equipo", "Personas", "Días", "Cupos Diarios", "%Uso Diario", "%Uso semanal"]
                     show_def = "Deficit" in df_out.columns and not df_out["Deficit"].isna().all() and (pd.to_numeric(df_out["Deficit"], errors="coerce").fillna(0) != 0).any()
                     if show_def:
                         df_out["Deficit"] = pd.to_numeric(df_out["Deficit"], errors="coerce").fillna(0).astype(int)
                         base_cols.append("Deficit")
 
-                    # render expander (deslizable como antes)
                     st.markdown("### Vista previa (Saint-Laguë semanal → diario)")
                     with st.expander("Ver detalle de la distribución (por piso y día)", expanded=False):
                         st.dataframe(
@@ -558,22 +546,22 @@ def screen_admin(conn):
     st.session_state.setdefault("forgot_mode", False)
 
     if not st.session_state["forgot_mode"]:
-        st.text_input("Ingresar correo", key="admin_login_email")
-        st.text_input("Contraseña", type="password", key="admin_login_pass")
+        st.text_input("Ingresar correo", key="adm_login_email")
+        st.text_input("Contraseña", type="password", key="adm_login_pass")
 
         c1, c2 = st.columns([1, 1], vertical_alignment="center")
 
         with c1:
-            if st.button("Olvidaste tu contraseña", key="btn_admin_forgot"):
+            if st.button("Olvidaste tu contraseña", key="adm_btn_forgot"):
                 st.session_state["forgot_mode"] = True
                 st.rerun()
 
         with c2:
             _, btn_col = st.columns([1, 1], vertical_alignment="center")
             with btn_col:
-                if st.button("Acceder", type="primary", key="btn_admin_login", use_container_width=True):
-                    e = st.session_state.get("admin_login_email", "").strip()
-                    p = st.session_state.get("admin_login_pass", "")
+                if st.button("Acceder", type="primary", key="adm_btn_login", use_container_width=True):
+                    e = st.session_state.get("adm_login_email", "").strip()
+                    p = st.session_state.get("adm_login_pass", "")
                     if not e or not p:
                         st.warning("Completa correo y contraseña.")
                     else:
@@ -586,25 +574,25 @@ def screen_admin(conn):
                             st.error("❌ Credenciales incorrectas.")
 
     else:
-        st.text_input("Correo de acceso", key="admin_reset_email")
+        st.text_input("Correo de acceso", key="adm_reset_email")
         st.caption("Ingresa el código recibido en tu correo.")
-        st.text_input("Código", key="admin_reset_code")
+        st.text_input("Código", key="adm_reset_code")
 
         c1, c2, c3 = st.columns([2, 1, 1], vertical_alignment="center")
         with c1:
-            if st.button("Volver a Acceso", key="btn_admin_back"):
+            if st.button("Volver a Acceso", key="adm_btn_back"):
                 st.session_state["forgot_mode"] = False
                 st.rerun()
         with c2:
-            if st.button("Enviar código", type="primary", key="btn_admin_send_code"):
-                e = st.session_state.get("admin_reset_email", "").strip()
+            if st.button("Enviar código", type="primary", key="adm_btn_send_code"):
+                e = st.session_state.get("adm_reset_email", "").strip()
                 if not e:
                     st.warning("Ingresa tu correo.")
                 else:
                     st.success("Código enviado (simulado).")
         with c3:
-            if st.button("Validar código", type="primary", key="btn_admin_validate"):
-                c = st.session_state.get("admin_reset_code", "").strip()
+            if st.button("Validar código", type="primary", key="adm_btn_validate"):
+                c = st.session_state.get("adm_reset_code", "").strip()
                 if not c:
                     st.warning("Ingresa el código.")
                 else:
@@ -692,16 +680,3 @@ else:
     screen_admin(conn)
 
 st.markdown("</div>", unsafe_allow_html=True)
-
-if screen == "Administrador":
-    screen_admin(conn)
-elif screen == "Reservas":
-    screen_reservas_tabs(conn)
-elif screen == "Planos":
-    screen_descargas_distribucion_planos(conn)
-else:
-    st.session_state["screen"] = "Administrador"
-    screen_admin(conn)
-
-st.markdown("</div>", unsafe_allow_html=True)
-
